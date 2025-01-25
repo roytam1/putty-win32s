@@ -1359,8 +1359,8 @@ int wc_to_mb(int codepage, int flags, const wchar_t *wcstr, int wclen,
         return p - mbstr;
     } else {
         int defused;
-        if(codepage == CP_UTF8) return WideCharToMultiByte(codepage, flags, wcstr, wclen,
-                                                           mbstr, mblen, defchr, &defused);
+        if(codepage == CP_UTF8) return WideCharToUtf8(codepage, flags, wcstr, wclen,
+                                                      mbstr, mblen);
         else return WideCharToMultiByte(codepage, flags, wcstr, wclen,
                                         mbstr, mblen, defchr, &defused);
     }
