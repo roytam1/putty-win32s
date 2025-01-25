@@ -107,10 +107,10 @@ RC = rc
 
 COMPAT=-DNO_SECUREZEROMEMORY -dNO_GSSAPI -DNO_IPV6 -DNO_MULTIMON -DNO_HTMLHELP -DNO_SECURITY
 
-CFLAGS = -za99 -bt=nt -D_WINDOWS -DWIN32S_COMPAT \
+CFLAGS = -za99 -bt=nt -l=win95 -D_WINDOWS -DWIN32S_COMPAT \
 		-D_NO_OLDNAMES -D__USE_MINGW_ANSI_STDIO=1 -I..\.\ \
 		-I..\charset\ -I..\windows\ -I..\unix\ -od
-LDFLAGS = -s
+LDFLAGS = -s -l=win95
 RCFLAGS = $(RCINC) -DWIN32=1 -D_WIN32=1 -DWINVER=0x0400 \
 		-I..\.\ -I..\charset\ -I..\windows\ -I..\unix\
 
