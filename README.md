@@ -10,9 +10,9 @@ The whole windows sourcetree builds, and loads.
 
 ## Building
 To build this, you need the following:
-* GNU make
-* WATCOM C (used OpenWatcom 2.0 beta)
-* mingw32-windres (for resource files, should work with wrc too)
+* OpenWatcom 2.0 beta under Windows
+
+In Open Watcom Build Environment (i.e. a cmd window that has `owsetenv.bat` executed), `cd windows` and then `nmake -f Makefile.wc` to compile. (OpenWatcom package should have both `nmake.exe` and `rc.exe` included)
 
 ## Prerequistes
 * Windows 3.11
