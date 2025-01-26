@@ -1296,9 +1296,21 @@ static void general_textout(HDC hdc, int x, int y, CONST RECT *lprc,
             exact_textout(hdc, xp, y, lprc, lpString+i, j-i,
                           font_varpitch ? NULL : lpDx+i, opaque);
         } else {
+#if 1
+#define countof(x) (sizeof(x) / sizeof(x[0]))
+            DWORD dwNum;
+            char psTXT[1024];
+            char *psText = psTXT;
+            dwNum = WideCharToMultiByte(CP_ACP,0, lpString+i, j-i, psText,countof(psTXT), NULL,NULL);
+
+            ExtTextOutA(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
+                        lprc, psTXT, dwNum,
+                        font_varpitch ? NULL : lpDx+i);
+#else
             ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
                         lprc, lpString+i, j-i,
                         font_varpitch ? NULL : lpDx+i);
+#endif
         }
 
         i = j;
