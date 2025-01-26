@@ -127,6 +127,8 @@ static int caret_x = -1, caret_y = -1;
 
 static int kbd_codepage;
 
+static int isNT;
+
 static Ldisc *ldisc;
 static Backend *backend;
 
@@ -458,6 +460,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     int guess_width, guess_height;
 
     dll_hijacking_protection();
+
+    isNT = (GetVersion() < 0x80000000);
 
     hinst = inst;
 
@@ -1296,21 +1300,23 @@ static void general_textout(HDC hdc, int x, int y, CONST RECT *lprc,
             exact_textout(hdc, xp, y, lprc, lpString+i, j-i,
                           font_varpitch ? NULL : lpDx+i, opaque);
         } else {
-#if 1
-#define countof(x) (sizeof(x) / sizeof(x[0]))
-            DWORD dwNum;
-            char psTXT[1024];
-            char *psText = psTXT;
-            dwNum = WideCharToMultiByte(CP_ACP,0, lpString+i, j-i, psText,countof(psTXT), NULL,NULL);
+            if(!isNT) {
+                #define countof(x) (sizeof(x) / sizeof(x[0]))
+                DWORD dwNum;
+                char psTXT[1024];
+                char *psText = psTXT;
+                dwNum = WideCharToMultiByte(CP_ACP,0, lpString+i, j-i, psText,countof(psTXT), NULL,NULL);
+                psTXT[dwNum] = 0;
 
-            ExtTextOutA(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
-                        lprc, psTXT, dwNum,
-                        font_varpitch ? NULL : lpDx+i);
-#else
-            ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
-                        lprc, lpString+i, j-i,
-                        font_varpitch ? NULL : lpDx+i);
-#endif
+                ExtTextOutA(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
+                            lprc, psTXT, dwNum,
+                            NULL/*font_varpitch ? NULL : lpDx+i*/);
+                #undef countof
+            } else {
+                ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
+                            lprc, lpString+i, j-i,
+                            font_varpitch ? NULL : lpDx+i);
+            }
         }
 
         i = j;
