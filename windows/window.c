@@ -1302,15 +1302,21 @@ static void general_textout(HDC hdc, int x, int y, CONST RECT *lprc,
         } else {
             if(!isNT) {
                 #define countof(x) (sizeof(x) / sizeof(x[0]))
-                DWORD dwNum;
+                DWORD dwNum, x;
                 char psTXT[1024];
                 char *psText = psTXT;
+                int ansi_lpDx[1024];
                 dwNum = WideCharToMultiByte(CP_ACP,0, lpString+i, j-i, psText,countof(psTXT), NULL,NULL);
                 psTXT[dwNum] = 0;
+                if(!font_varpitch) {
+                    for(x=0;x < dwNum; x++) {
+                        ansi_lpDx[x] = lpDx[i+(x/2)] / 2;
+                    }
+                }
 
                 ExtTextOutA(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
                             lprc, psTXT, dwNum,
-                            NULL/*font_varpitch ? NULL : lpDx+i*/);
+                            font_varpitch ? NULL : ansi_lpDx);
                 #undef countof
             } else {
                 ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
