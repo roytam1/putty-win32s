@@ -15,9 +15,9 @@ To build this, you need the following:
 In Open Watcom Build Environment (i.e. a cmd window that has `owsetenv.bat` executed), `cd windows` and then `nmake -f Makefile.wc` to compile. (OpenWatcom package should have both `nmake.exe` and `rc.exe` included)
 
 ## Prerequistes
-* Windows 3.11
-* Microsoft TCP/IP-32 version 3.11b (or a compatible winsock 1.1 stack)
-* Microsoft Win32s 1.30c (might work in other versions, not tested)
+* Windows 3.1 (or 3.11 or 3.2 PRC version)
+* Microsoft TCP/IP-32 version 3.11b or a compatible winsock 1.1 stack, for example, Trumpet Winsock
+* Microsoft Win32s 1.30c (OLE-enabled one, might work in other versions, not tested)
 
 ## Running
 * As the UNIX codepath for sessions saving/loading is used, you should set a HOME environment variable in AUTOEXEC.BAT
@@ -26,9 +26,10 @@ In Open Watcom Build Environment (i.e. a cmd window that has `owsetenv.bat` exec
 
 ## What works
 * the GUI apps, at least putty.exe, puttytel.exe and puttygen.exe
+* limited UTF-8 support based on Active Code Page, for example CP1252 for en-US version of Windows, CP932 for ja-JP, CP950 for zh-TW, etc.
 
 ## What doesn't work
-* Unicode. really. at all.
+* Unicode that excceeds what Active Code Page (ACP) supports.
 * pageant.exe.
 * console applications.
   They'll load, and that's all, win32s doesn't support console applications.
