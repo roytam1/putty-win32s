@@ -459,7 +459,7 @@ static INT_PTR CALLBACK GenericMainDlgProc(HWND hwnd, UINT msg,
             r.bottom = r.top + 219;
             MapDialogRect(hwnd, &r);
             treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
-                                      WS_CHILD | WS_VISIBLE |
+                                      WS_CHILD | WS_BORDER | WS_VISIBLE |
                                       WS_TABSTOP | TVS_HASLINES |
                                       TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
                                       | TVS_LINESATROOT |

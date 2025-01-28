@@ -182,7 +182,7 @@ void editboxfw(struct ctlpos *cp, bool password, char *text,
     r.top = cp->ypos;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL |
+          WS_CHILD | WS_BORDER | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL |
           (password ? ES_PASSWORD : 0),
           WS_EX_CLIENTEDGE, "", editid);
     cp->ypos += EDITHEIGHT + GAPBETWEEN;
@@ -641,7 +641,7 @@ static void staticedit_internal(struct ctlpos *cp, char *stext,
     r.right = rwid;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | style,
+          WS_CHILD | WS_BORDER | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | style,
           WS_EX_CLIENTEDGE, "", eid);
 
     cp->ypos += height + GAPBETWEEN;
@@ -803,7 +803,7 @@ void listbox(struct ctlpos *cp, char *stext,
     r.bottom = LISTHEIGHT + (lines - 1) * LISTINCREMENT;
     cp->ypos += r.bottom + GAPBETWEEN;
     doctl(cp, r, "LISTBOX",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+          WS_CHILD | WS_BORDER | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
           LBS_NOTIFY | LBS_HASSTRINGS | LBS_USETABSTOPS |
           (multi ? LBS_MULTIPLESEL : 0),
           WS_EX_CLIENTEDGE, "", lid);
@@ -879,7 +879,7 @@ void editbutton(struct ctlpos *cp, char *stext, int sid,
     r.right = lwid;
     r.bottom = EDITHEIGHT;
     doctl(cp, r, "EDIT",
-          WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+          WS_CHILD | WS_BORDER | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
           WS_EX_CLIENTEDGE, "", eid);
 
     r.left = rpos;
@@ -945,7 +945,7 @@ void prefslist(struct prefslist *hdl, struct ctlpos *cp, int lines,
             r.left = left; r.right = wid;
             r.top = cp->ypos; r.bottom = listheight;
             HWND ctl = doctl(cp, r, "LISTBOX",
-                             WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+                             WS_CHILD | WS_BORDER | WS_VISIBLE | WS_TABSTOP |
                              WS_VSCROLL | LBS_HASSTRINGS | LBS_USETABSTOPS,
                              WS_EX_CLIENTEDGE,
                              "", listid);
@@ -1169,7 +1169,7 @@ void progressbar(struct ctlpos *cp, int id)
     r.bottom = PROGBARHEIGHT;
     cp->ypos += r.bottom + GAPBETWEEN;
 
-    doctl(cp, r, PROGRESS_CLASS, WS_CHILD | WS_VISIBLE
+    doctl(cp, r, PROGRESS_CLASS, WS_CHILD | WS_BORDER | WS_VISIBLE
 #ifdef PBS_SMOOTH
           | PBS_SMOOTH
 #endif
