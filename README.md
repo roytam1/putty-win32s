@@ -5,7 +5,7 @@ Maybe this may help close this bug:
 https://www.chiark.greenend.org.uk/~sgtatham/putty/wishlist/port-win32s.html
 
 ![putty-win32s](/assets/putty-about.png)
-![putty-win32s](https://github.com/user-attachments/assets/3c6edeca-be3b-4f69-b1cd-98de0f004d96)
+![putty-utf8](/assets/putty-utf8.png)
 
 The whole windows sourcetree builds, and loads.
 
