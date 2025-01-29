@@ -124,7 +124,14 @@ static char *make_filename(int index, const char *subname)
             return dupstr(env);
 
         home = getenv("HOME");
-        if(!home) home="C:\\HOME";
+        char buff[MAX_PATH * 2];
+        if(!home) {
+            //home="C:\\HOME";
+            memset(buff, '\0', sizeof(buff));
+            GetWindowsDirectory(buff, sizeof(buff));
+            strcpy(buff+3,"HOME");
+            home=buff;
+        }
 
         xdg_dir = NULL;
 
