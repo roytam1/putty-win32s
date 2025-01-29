@@ -124,7 +124,7 @@ static char *make_filename(int index, const char *subname)
             return dupstr(env);
 
         home = getenv("HOME");
-        if(!home) home="C:\HOME";
+        if(!home) home="C:\\HOME";
 
         xdg_dir = NULL;
 
