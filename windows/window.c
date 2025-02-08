@@ -3220,8 +3220,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 
             si.cbSize = sizeof(si);
             si.fMask = SIF_TRACKPOS;
-            if (MyGetScrollInfo(hwnd, SB_VERT, &si) == 0)
-                si.nTrackPos = HIWORD(wParam);
+            si.nTrackPos = HIWORD(wParam);
+            MyGetScrollInfo(hwnd, SB_VERT, &si);
             term_scroll(term, 1, si.nTrackPos);
             break;
           }
