@@ -127,8 +127,6 @@ static int caret_x = -1, caret_y = -1;
 
 static int kbd_codepage;
 
-static int isNT;
-
 static Ldisc *ldisc;
 static Backend *backend;
 
@@ -560,8 +558,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     int guess_width, guess_height;
 
     dll_hijacking_protection();
-
-    isNT = (GetVersion() < 0x80000000);
 
     hinst = inst;
 
@@ -1400,7 +1396,7 @@ static void general_textout(HDC hdc, int x, int y, CONST RECT *lprc,
             exact_textout(hdc, xp, y, lprc, lpString+i, j-i,
                           font_varpitch ? NULL : lpDx+i, opaque);
         } else {
-            if(!isNT) {
+            if(osPlatformId != VER_PLATFORM_WIN32_NT) {
                 #define countof(x) (sizeof(x) / sizeof(x[0]))
                 DWORD dwNum, x;
                 char psTXT[1024];
