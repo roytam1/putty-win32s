@@ -560,7 +560,7 @@ HWND event_log_window(void);
 /*
  * Exports from winmisc.c.
  */
-extern DWORD osMajorVersion, osMinorVersion, osPlatformId;
+extern DWORD osMajorVersion, osMinorVersion, osBuild, osPlatformId;
 void init_winver(void);
 void dll_hijacking_protection(void);
 HMODULE load_system32_dll(const char *libname);
