@@ -399,6 +399,7 @@ static Ssh_gss_stat ssh_sspi_acquire_cred(struct ssh_gss_library *lib,
 static void localexp_to_exp_lifetime(TimeStamp *localexp,
                                      time_t *expiry, unsigned long *lifetime)
 {
+    SYSTEMTIME nowSysTime;
     FILETIME nowUTC;
     FILETIME expUTC;
     time_t now;
@@ -408,7 +409,8 @@ static void localexp_to_exp_lifetime(TimeStamp *localexp,
     if (!lifetime && !expiry)
         return;
 
-    GetSystemTimeAsFileTime(&nowUTC);
+    GetSystemTime(&nowSysTime);
+    SystemTimeToFileTime(&nowSysTime, &nowUTC);
     TIME_WIN_TO_POSIX(nowUTC, now);
 
     if (lifetime)
