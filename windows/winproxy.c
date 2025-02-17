@@ -12,6 +12,30 @@
 #include "network.h"
 #include "proxy.h"
 
+/* SetHandleInformation wrapper */
+typedef BOOL (WINAPI *SSHDLINF)(HANDLE, DWORD, DWORD);
+BOOL WINAPI MySetHandleInformation_fallback(HANDLE hObject, DWORD dwMask, DWORD dwFlags)
+{
+    return TRUE;
+}
+
+BOOL WINAPI MySetHandleInformation_init(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+static SSHDLINF MySetHandleInformation = MySetHandleInformation_init;
+
+int WINAPI MySetHandleInformation_init(HANDLE hObject, DWORD dwMask, DWORD dwFlags)
+{
+	if( MySetHandleInformation == MySetHandleInformation_init ) {
+		MySetHandleInformation = (SSHDLINF)GetProcAddress(GetModuleHandleA("KERNEL32.DLL"), "SetHandleInformation");
+
+		if( !MySetHandleInformation ) {
+			MySetHandleInformation = MySetHandleInformation_fallback;
+		}
+	}
+
+	return MySetHandleInformation( hObject, dwMask, dwFlags );
+}
+/* end of SetHandleInformation wrapper */
+
 Socket *platform_new_connection(SockAddr *addr, const char *hostname,
                                 int port, bool privport,
                                 bool oobinline, bool nodelay, bool keepalive,
@@ -73,10 +97,10 @@ Socket *platform_new_connection(SockAddr *addr, const char *hostname,
             win_strerror(GetLastError()));
     }
 
-    SetHandleInformation(us_to_cmd, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(us_from_cmd, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation(us_to_cmd, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation(us_from_cmd, HANDLE_FLAG_INHERIT, 0);
     if (us_from_cmd_err != NULL)
-        SetHandleInformation(us_from_cmd_err, HANDLE_FLAG_INHERIT, 0);
+        MySetHandleInformation(us_from_cmd_err, HANDLE_FLAG_INHERIT, 0);
 
     si.cb = sizeof(si);
     si.lpReserved = NULL;
