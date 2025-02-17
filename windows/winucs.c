@@ -437,6 +437,30 @@ static const struct cp_list_item cp_list[] = {
 
 static void link_font(WCHAR * line_tbl, WCHAR * font_tbl, WCHAR attr);
 
+/* IsDBCSLeadByteEx wrapper */
+typedef BOOL (WINAPI *IDBCSLBEX)(UINT, BYTE);
+BOOL WINAPI MyIsDBCSLeadByteEx_fallback(UINT CodePage, BYTE TestChar)
+{
+    return IsDBCSLeadByte(TestChar);
+}
+
+BOOL WINAPI MyIsDBCSLeadByteEx_init(UINT CodePage, BYTE TestChar);
+static IDBCSLBEX MyIsDBCSLeadByteEx = MyIsDBCSLeadByteEx_init;
+
+int WINAPI MyIsDBCSLeadByteEx_init(UINT CodePage, BYTE TestChar)
+{
+	if( MyIsDBCSLeadByteEx == MyIsDBCSLeadByteEx_init ) {
+		MyIsDBCSLeadByteEx = (IDBCSLBEX)GetProcAddress(GetModuleHandleA("KERNEL32.DLL"), "IsDBCSLeadByteEx");
+
+		if( !MyIsDBCSLeadByteEx ) {
+			MyIsDBCSLeadByteEx = MyIsDBCSLeadByteEx_fallback;
+		}
+	}
+
+	return MyIsDBCSLeadByteEx( CodePage, TestChar );
+}
+/* end of IsDBCSLeadByteEx wrapper */
+
 /*** UTF16<-->UTF8 functions minicking MultiByteToWideChar/WideCharToMultiByte ***/
 int utf8GetMaskIndex(unsigned char n) {
 	if ((unsigned char)(n + 2) < 0xc2) return 1; // 00~10111111, fe, ff
@@ -1375,5 +1399,5 @@ int mb_to_wc(int codepage, int flags, const char *mbstr, int mblen,
 
 bool is_dbcs_leadbyte(int codepage, char byte)
 {
-    return IsDBCSLeadByteEx(codepage, byte);
+    return codepage == CP_UTF8 ? byte > 0x80 : MyIsDBCSLeadByteEx(codepage, byte);
 }
