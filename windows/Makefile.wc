@@ -111,6 +111,7 @@ CFLAGS = -za99 -bt=nt -l=win95 -D_WINDOWS -DWIN32S_COMPAT \
 		-D_NO_OLDNAMES -D__USE_MINGW_ANSI_STDIO=1 -I..\.\ \
 		-I..\charset\ -I..\windows\ -I..\unix\ -od
 LDFLAGS = -s -l=win95
+CLI_LDFLAGS = -s -l=win95 -"runtime con=3.10"
 RCFLAGS = $(RCINC) -DWIN32=1 -D_WIN32=1 -DWINVER=0x0400 \
 		-I..\.\ -I..\charset\ -I..\windows\ -I..\unix\
 
@@ -164,7 +165,7 @@ plink.exe: agentf.obj aqsync.obj be_all_s.obj be_misc.obj callback.obj clicons.o
 		x11fwd.obj
 
 	#$(RC)   plink.rc -O res -o plink.res
-	$(CC) -bt=nt -l=nt_win -fe=plink.exe $(LDFLAGS) agentf.obj aqsync.obj be_all_s.obj be_misc.obj callback.obj clicons.obj \
+	$(CC) -bt=nt -fe=plink.exe $(CLI_LDFLAGS) agentf.obj aqsync.obj be_all_s.obj be_misc.obj callback.obj clicons.obj \
 		cmdline.obj conf.obj console.obj cproxy.obj ecc.obj errsock.obj ldisc.obj \
 		logging.obj mainchan.obj marshal.obj memory.obj misc.obj miscucs.obj \
 		mpint.obj noterm.obj nullplug.obj pgssapi.obj pinger.obj plink.res \
@@ -209,7 +210,7 @@ pscp.exe: agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj 
 		winproxy.obj winsecur.obj winselcli.obj winsftp.obj winshare.obj \
 		winstore.obj wintime.obj winucs.obj x11fwd.obj
 	#$(RC)   pscp.rc -O res -o pscp.res
-	$(CC) -bt=nt -l=nt_win -fe=pscp.exe $(LDFLAGS) agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj \
+	$(CC) -bt=nt -fe=pscp.exe $(CLI_LDFLAGS) agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj \
 		cmdline.obj conf.obj console.obj cproxy.obj ecc.obj errsock.obj \
 		logging.obj mainchan.obj marshal.obj memory.obj misc.obj miscucs.obj \
 		mpint.obj nullplug.obj pgssapi.obj pinger.obj portfwd.obj proxy.obj \
@@ -253,7 +254,7 @@ psftp.exe: agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj
 		winproxy.obj winsecur.obj winselcli.obj winsftp.obj winshare.obj \
 		winstore.obj wintime.obj winucs.obj x11fwd.obj
 	#$(RC)   psftp.rc -O res -o psftp.res
-	$(CC) -bt=nt -l=nt_win -fe=psftp.exe $(LDFLAGS) agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj \
+	$(CC) -bt=nt -fe=psftp.exe $(CLI_LDFLAGS) agentf.obj aqsync.obj be_misc.obj be_ssh.obj callback.obj clicons.obj \
 		cmdline.obj conf.obj console.obj cproxy.obj ecc.obj errsock.obj \
 		logging.obj mainchan.obj marshal.obj memory.obj misc.obj miscucs.obj \
 		mpint.obj nullplug.obj pgssapi.obj pinger.obj portfwd.obj proxy.obj \
@@ -280,8 +281,8 @@ psocks.exe: be_misc.obj callback.obj conf.obj console.obj errsock.obj logging.ob
 		proxy.obj psocks.obj sshutils.obj stripctrl.obj time.obj timing.obj \
 		tree234.obj utils.obj version.obj wcwidth.obj wincliloop.obj wincons.obj \
 		winhandl.obj winhsock.obj winmisc.obj winmiscs.obj winnet.obj \
-		winnohlp.obj winproxy.obj winselcli.obj winsocks.o
-	$(CC) $(LDFLAGS) -o $@ -Wl,-Map,psocks.map be_misc.obj callback.obj \
+		winnohlp.obj winproxy.obj winselcli.obj winsocks.obj
+	$(CC) -bt=nt -fe=psftp.exe $(CLI_LDFLAGS) be_misc.obj callback.obj \
 		conf.obj console.obj errsock.obj logging.obj marshal.obj memory.obj \
 		misc.obj nocproxy.obj norand.obj portfwd.obj proxy.obj psocks.obj \
 		sshutils.obj stripctrl.obj time.obj timing.obj tree234.obj utils.obj \
@@ -385,7 +386,7 @@ testcrypt.exe: ecc.obj marshal.obj memory.obj millerrabin.obj mpint.obj mpunsafe
 		sshecc.obj sshecdsag.obj sshhmac.obj sshmd5.obj sshprime.obj sshprng.obj \
 		sshpubk.obj sshrsa.obj sshrsag.obj sshsh256.obj sshsh512.obj sshsha.obj \
 		sshsha3.obj testcrypt.obj tree234.obj utils.obj winmiscs.obj
-	$(CC) -bt=nt -l=nt_win -fe=testcryp.exe $(LDFLAGS) ecc.obj marshal.obj memory.obj millerrabin.obj mpint.obj mpunsafe.obj \
+	$(CC) -bt=nt -fe=testcryp.exe $(CLI_LDFLAGS) ecc.obj marshal.obj memory.obj millerrabin.obj mpint.obj mpunsafe.obj \
 		pockle.obj primecandidate.obj smallprimes.obj sshaes.obj ssharcf.obj \
 		sshargon2.obj sshauxcrypt.obj sshblake2.obj sshblowf.obj sshccp.obj \
 		sshcrc.obj sshcrcda.obj sshdes.obj sshdh.obj sshdss.obj sshdssg.obj \
@@ -793,6 +794,13 @@ psftpcommon.obj: ../psftpcommon.c ../putty.h ../sftp.h ../psftp.h ../defs.h \
 		../puttymem.h ../tree234.h ../windows/winhelp.h \
 		../charset/charset.h
 	$(CC) $(COMPAT) $(CFLAGS) $(XFLAGS) -c ../psftpcommon.c
+
+psocks.obj: ../psocks.c ../putty.h ../ssh.h ../sshchan.h ../psocks.h ../defs.h \
+		../puttyps.h ../network.h ../misc.h ../marshal.h \
+		../sshsignals.h ../windows/winstuff.h ../unix/unix.h \
+		../puttymem.h ../tree234.h ../windows/winhelp.h \
+		../charset/charset.h
+	$(CC) $(COMPAT) $(CFLAGS) $(XFLAGS) -c ../psocks.c
 
 putty.res: ../windows/putty.rc ../windows/rcstuff.h ../windows/winhelp.rc2 \
 		../windows/win_res.rc2 ../windows/putty.mft \
