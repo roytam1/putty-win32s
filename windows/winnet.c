@@ -259,6 +259,8 @@ void sk_init(void)
 #ifndef NO_IPV6
     winsock2_module =
 #endif
+        winsock_module = load_system32_dll("ws2_32.dll");
+    if (!winsock_module)
         winsock_module = load_system32_dll("wsock32.dll");
     if (!winsock_module)
         modalfatalbox("Unable to load any WinSock library");
