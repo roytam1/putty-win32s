@@ -75,6 +75,13 @@ HWND doctl(struct ctlpos *cp, RECT r, const char *wclass, int wstyle,
            int exstyle, const char *wtext, int wid)
 {
     HWND ctl;
+#ifdef WIN32S_COMPAT
+    /* Win32s has no WS_EX_CLIENTEDGE; substitute WS_BORDER. */
+    if (exstyle & WS_EX_CLIENTEDGE) {
+        exstyle &= ~WS_EX_CLIENTEDGE;
+        wstyle |= WS_BORDER;
+    }
+#endif
     /*
      * Note nonstandard use of RECT. This is deliberate: by
      * transforming the width and height directly we arrange to

@@ -518,12 +518,24 @@ static INT_PTR GenericMainDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
             r.top = 13;
             r.bottom = r.top + 219;
             MapDialogRect(hwnd, &r);
+#ifdef WIN32S_COMPAT
+            /* Win32s: WS_EX_CLIENTEDGE does not exist and corrupts
+             * the non-client area (scrollbar tracking breaks).
+             * Use WS_BORDER for a simple border instead. */
+            treeview = CreateWindowEx(0, WC_TREEVIEW, "",
+                                      WS_CHILD | WS_VISIBLE | WS_BORDER |
+                                      WS_TABSTOP | TVS_HASLINES |
+                                      TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
+                                      | TVS_LINESATROOT |
+                                      TVS_SHOWSELALWAYS, r.left, r.top,
+#else
             treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
                                       WS_CHILD | WS_VISIBLE |
                                       WS_TABSTOP | TVS_HASLINES |
                                       TVS_DISABLEDRAGDROP | TVS_HASBUTTONS
                                       | TVS_LINESATROOT |
                                       TVS_SHOWSELALWAYS, r.left, r.top,
+#endif
                                       r.right - r.left, r.bottom - r.top,
                                       hwnd, (HMENU) IDCX_TREEVIEW, hinst,
                                       NULL);
@@ -899,8 +911,13 @@ static INT_PTR HostKeyMoreInfoProc(HWND hwnd, UINT msg, WPARAM wParam,
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
 
                 MapDialogRect(hwnd, &rv);
+#ifdef WIN32S_COMPAT
+                ctl = CreateWindowEx(
+                    0, "EDIT", item->text, editstyle | WS_BORDER,
+#else
                 ctl = CreateWindowEx(
                     WS_EX_CLIENTEDGE, "EDIT", item->text, editstyle,
+#endif
                     rv.left, rv.top, rv.right, rv.bottom,
                     hwnd, (HMENU)(ULONG_PTR)index++, hinst, NULL);
                 SendMessage(ctl, WM_SETFONT, font, MAKELPARAM(true, 0));
