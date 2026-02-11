@@ -593,9 +593,20 @@ void init_ucs(Conf *conf, struct unicode_data *ucsdata)
         get_unitab(437, ucsdata->unitab_scoacs, 1);
 
     /* Collect line set ucs table */
+#ifdef WIN32S_COMPAT
+    /*
+     * Win32s: force direct-to-font when the line codepage matches
+     * the font codepage, or the font codepage is unknown (0).
+     * MultiByteToWideChar and ExtTextOutW are not reliable on
+     * Win32s, so we pass raw bytes through to the ANSI font.
+     */
+    if (ucsdata->line_codepage == ucsdata->font_codepage ||
+        ucsdata->font_codepage == 0) {
+#else
     if (ucsdata->line_codepage == ucsdata->font_codepage &&
         (ucsdata->dbcs_screenfont ||
          vtmode == VT_POORMAN || ucsdata->font_codepage==0)) {
+#endif
 
         /* For DBCS and POOR fonts force direct to font */
         used_dtf = true;
