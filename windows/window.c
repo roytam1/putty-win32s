@@ -4780,17 +4780,25 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
          * be is? There's indication on MS' website of an Inquire/InquireEx
          * functioning returning a KBINFO structure which tells us. */
 #ifdef WIN32S_COMPAT
+        /*
+         * Win32s: filter key-up events — ToAscii returns the character
+         * again on key release, which would produce a duplicate.
+         */
+        if (message == WM_KEYUP || message == WM_SYSKEYUP)
+            return 0;
         {
-            int i;
             WORD keys[3];
-            BYTE keysb[3];
             r = ToAscii(wParam, scan, keystate, keys, 0);
             if (r > 0) {
-                for (i = 0; i < r; i++) {
-                    keysb[i] = (BYTE)keys[i];
-                }
-                MultiByteToWideChar(CP_ACP, 0, (LPCSTR)keysb, r,
-                                    keys_unicode, lenof(keys_unicode));
+                /*
+                 * Return the raw bytes directly.  The caller sends
+                 * them via term_keyinput with the terminal's line
+                 * codepage, avoiding MultiByteToWideChar/ExtTextOutW
+                 * which are unreliable on Win32s.
+                 */
+                for (i = 0; i < r; i++)
+                    *p++ = (unsigned char)keys[i];
+                return p - output;
             }
         }
 #else
