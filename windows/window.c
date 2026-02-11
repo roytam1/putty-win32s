@@ -1053,6 +1053,12 @@ void cleanup_exit(int code)
     while (wgslisthead.next != &wgslisthead) {
         WinGuiSeat *wgs = container_of(
             wgslisthead.next, WinGuiSeat, wgslistnode);
+#ifdef WIN32S_COMPAT
+        if (wgs->term_hwnd) {
+            DestroyWindow(wgs->term_hwnd);
+            wgs->term_hwnd = NULL;
+        }
+#endif
         wgs_cleanup(wgs);
     }
     sk_cleanup();
