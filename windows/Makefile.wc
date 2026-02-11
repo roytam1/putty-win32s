@@ -23,8 +23,8 @@ RCPATH   = $(TOOLPATH)$(RC)
 # Compiler / linker flags
 # -----------------------------------------------------------------
 
-COMPAT = -DNO_SECUREZEROMEMORY -DNO_GSSAPI -DNO_IPV6 -DNO_MULTIMON &
-         -DNO_HTMLHELP -DNO_SECURITY &
+COMPAT = -DNO_GSSAPI -DNO_IPV6 -DNO_MULTIMON &
+         -DNO_HTMLHELP &
          -DWIN32S_COMPAT -DLEGACY_WINDOWS
 
 CFLAGS = -za99 -bt=nt -od -D_WINDOWS -D_WIN32 -DWIN32 &

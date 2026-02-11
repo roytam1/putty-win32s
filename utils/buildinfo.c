@@ -151,9 +151,6 @@ char *buildinfo(const char *newline)
 #ifdef NO_MULTIMON
     put_fmt(buf, "%sBuild option: NO_MULTIMON", newline);
 #endif
-#ifdef NO_SECUREZEROMEMORY
-    put_fmt(buf, "%sBuild option: NO_SECUREZEROMEMORY", newline);
-#endif
 #ifdef WIN32S_COMPAT
     put_fmt(buf, "%sBuild option: WIN32S_COMPAT", newline);
 #endif
