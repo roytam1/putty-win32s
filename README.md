@@ -12,6 +12,8 @@ The whole windows sourcetree builds, and putty.exe, puttytel.exe and puttygen.ex
 To build this, you need the following:
 * OpenWatcom 2.0 beta
 
+Then go in the 'windows' directory and type `wmake -f Makefile.wc win32s`
+
 ## Prerequistes
 * Windows 3.11
 * Microsoft TCP/IP-32 version 3.11b (or a compatible winsock 1.1 stack)
