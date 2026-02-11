@@ -13,7 +13,7 @@
 .PP
 \fBpsocks\fP is a simple SOCKS4/5 proxy server. It supports proxying IPv4 and IPv6 connections. It does not support requiring authentication of its clients.
 .PP
-\fBpsocks\fP can be used together with an SSH client such as \fBputty(1)\fP to implement a reverse dynamic SSH tunnel. It can also be used for network protocol debugging, as it can record all the traffic passing through it in various ways.
+\fBpsocks\fP can be used together with an SSH client such as \fBputty\fP(\fI1\fP) to implement a reverse dynamic SSH tunnel. It can also be used for network protocol debugging, as it can record all the traffic passing through it in various ways.
 .PP
 By default, \fBpsocks\fP listens to connections from localhost only, on TCP port 1080. A different \fIport-number\fP can optionally be supplied, and with \fB-g\fP it will listen to connections from any host.
 .PP
@@ -46,7 +46,7 @@ Each command will run for the direction of a proxied connection, and have the co
 .RE
 .SH "EXAMPLES"
 .PP
-In combination with the \fIplink(1)\fP SSH client, to set up a reverse dynamic SSH tunnel, in which the remote listening port 1080 on remote host \fBmyhost\fP acts as a SOCKS server giving access to your local network:
+In combination with the \fBplink\fP(\fI1\fP) SSH client, to set up a reverse dynamic SSH tunnel, in which the remote listening port 1080 on remote host \fBmyhost\fP acts as a SOCKS server giving access to your local network:
 .PP
 .nf
 psocks\ 12345\ \-\-exec\ plink\ \-R\ 1080:localhost:12345\ user@myhost

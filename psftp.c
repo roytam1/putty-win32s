@@ -12,9 +12,7 @@
 #include "psftp.h"
 #include "storage.h"
 #include "ssh.h"
-#include "sftp.h"
-
-const char *const appname = "PSFTP";
+#include "ssh/sftp.h"
 
 /*
  * Since SFTP is a request-response oriented protocol, it requires
@@ -41,28 +39,36 @@ static bool sent_eof = false;
  * Seat vtable.
  */
 
-static size_t psftp_output(Seat *, bool is_stderr, const void *, size_t);
+static size_t psftp_output(Seat *, SeatOutputType type, const void *, size_t);
 static bool psftp_eof(Seat *);
 
 static const SeatVtable psftp_seat_vt = {
     .output = psftp_output,
     .eof = psftp_eof,
+    .sent = nullseat_sent,
+    .banner = nullseat_banner_to_stderr,
     .get_userpass_input = filexfer_get_userpass_input,
+    .notify_session_started = nullseat_notify_session_started,
     .notify_remote_exit = nullseat_notify_remote_exit,
+    .notify_remote_disconnect = nullseat_notify_remote_disconnect,
     .connection_fatal = console_connection_fatal,
+    .nonfatal = console_nonfatal,
     .update_specials_menu = nullseat_update_specials_menu,
     .get_ttymode = nullseat_get_ttymode,
     .set_busy_status = nullseat_set_busy_status,
-    .verify_ssh_host_key = console_verify_ssh_host_key,
+    .confirm_ssh_host_key = console_confirm_ssh_host_key,
     .confirm_weak_crypto_primitive = console_confirm_weak_crypto_primitive,
     .confirm_weak_cached_hostkey = console_confirm_weak_cached_hostkey,
+    .prompt_descriptions = console_prompt_descriptions,
     .is_utf8 = nullseat_is_never_utf8,
     .echoedit_update = nullseat_echoedit_update,
     .get_x_display = nullseat_get_x_display,
     .get_windowid = nullseat_get_windowid,
     .get_window_pixel_size = nullseat_get_window_pixel_size,
     .stripctrl_new = console_stripctrl_new,
-    .set_trust_status = nullseat_set_trust_status_vacuously,
+    .set_trust_status = nullseat_set_trust_status,
+    .can_set_trust_status = nullseat_can_set_trust_status_yes,
+    .has_mixed_input_stream = nullseat_has_mixed_input_stream_no,
     .verbose = cmdline_seat_verbose,
     .interactive = nullseat_interactive_yes,
     .get_cursor_position = nullseat_get_cursor_position,
@@ -1019,7 +1025,7 @@ int sftp_cmd_close(struct sftp_command *cmd)
     }
     do_sftp_cleanup();
 
-    return 0;
+    return 1;
 }
 
 void list_directory_from_sftp_warn_unsorted(void)
@@ -2381,9 +2387,13 @@ static void do_sftp_cleanup(void)
         sfree(homedir);
         homedir = NULL;
     }
+    if (psftp_logctx) {
+        log_free(psftp_logctx);
+        psftp_logctx = NULL;
+    }
 }
 
-int do_sftp(int mode, int modeflags, char *batchfile)
+int do_sftp(int mode, int modeflags, Filename *batchfile)
 {
     FILE *fp;
     int ret;
@@ -2407,9 +2417,9 @@ int do_sftp(int mode, int modeflags, char *batchfile)
                 break;
         }
     } else {
-        fp = fopen(batchfile, "r");
+        fp = f_open(batchfile, "r", false);
         if (!fp) {
-            printf("Fatal: unable to open %s\n", batchfile);
+            printf("Fatal: unable to open %s\n", filename_to_str(batchfile));
             return 1;
         }
         ret = 0;
@@ -2444,6 +2454,7 @@ int do_sftp(int mode, int modeflags, char *batchfile)
 static bool verbose = false;
 
 void ldisc_echoedit_update(Ldisc *ldisc) { }
+void ldisc_check_sendok(Ldisc *ldisc) { }
 
 /*
  * Receive a block of data from the SSH link. Block until all data
@@ -2456,13 +2467,14 @@ void ldisc_echoedit_update(Ldisc *ldisc) { }
 static bufchain received_data;
 static BinarySink *stderr_bs;
 static size_t psftp_output(
-    Seat *seat, bool is_stderr, const void *data, size_t len)
+    Seat *seat, SeatOutputType type, const void *data, size_t len)
 {
     /*
-     * stderr data is just spouted to local stderr (optionally via a
-     * sanitiser) and otherwise ignored.
+     * Non-stdout data (both stderr and SSH auth banners) is just
+     * spouted to local stderr (optionally via a sanitiser) and
+     * otherwise ignored.
      */
-    if (is_stderr) {
+    if (type != SEAT_OUTPUT_STDOUT) {
         put_data(stderr_bs, data, len);
         return 0;
     }
@@ -2529,7 +2541,7 @@ static void usage(void)
     printf("  -load sessname  Load settings from saved session\n");
     printf("  -l user   connect with specified username\n");
     printf("  -P port   connect to specified port\n");
-    printf("  -pw passw login with specified password\n");
+    printf("  -pwfile file   login with password read from specified file\n");
     printf("  -1 -2     force use of particular SSH protocol version\n");
     printf("  -ssh -ssh-connection\n");
     printf("            force use of particular SSH protocol variant\n");
@@ -2553,15 +2565,14 @@ static void usage(void)
     printf("  -logoverwrite\n");
     printf("  -logappend\n");
     printf("            control what happens when a log file already exists\n");
-    cleanup_exit(1);
 }
 
 static void version(void)
 {
-  char *buildinfo_text = buildinfo("\n");
-  printf("psftp: %s\n%s\n", ver, buildinfo_text);
-  sfree(buildinfo_text);
-  exit(0);
+    char *buildinfo_text = buildinfo("\n");
+    printf("psftp: %s\n%s\n", ver, buildinfo_text);
+    sfree(buildinfo_text);
+    exit(0);
 }
 
 /*
@@ -2781,17 +2792,18 @@ const unsigned cmdline_tooltype = TOOLTYPE_FILETRANSFER;
 /*
  * Main program. Parse arguments etc.
  */
-int psftp_main(int argc, char *argv[])
+int psftp_main(CmdlineArgList *arglist)
 {
-    int i, ret;
+    int toret;
     int portnumber = 0;
     char *userhost, *user;
     int mode = 0;
     int modeflags = 0;
     bool sanitise_stderr = true;
-    char *batchfile = NULL;
+    Filename *batchfile = NULL;
 
     sk_init();
+    enable_dit();
 
     userhost = user = NULL;
 
@@ -2799,56 +2811,58 @@ int psftp_main(int argc, char *argv[])
     conf = conf_new();
     do_defaults(NULL, conf);
 
-    for (i = 1; i < argc; i++) {
-        int ret;
-        if (argv[i][0] != '-') {
+    size_t arglistpos = 0;
+    while (arglist->args[arglistpos]) {
+        CmdlineArg *arg = arglist->args[arglistpos++];
+        CmdlineArg *nextarg = arglist->args[arglistpos];
+        const char *argstr = cmdline_arg_to_str(arg);
+
+        if (argstr[0] != '-') {
             if (userhost)
-                usage();
+                cmdline_error("unexpected extra argument \"%s\"", argstr);
             else
-                userhost = dupstr(argv[i]);
+                userhost = dupstr(argstr);
             continue;
         }
-        ret = cmdline_process_param(argv[i], i+1<argc?argv[i+1]:NULL, 1, conf);
-        if (ret == -2) {
-            cmdline_error("option \"%s\" requires an argument", argv[i]);
-        } else if (ret == 2) {
-            i++;               /* skip next argument */
-        } else if (ret == 1) {
+        int retd = cmdline_process_param(arg, nextarg, 1, conf);
+        if (retd == -2) {
+            cmdline_error("option \"%s\" requires an argument", argstr);
+        } else if (retd == 2) {
+            arglistpos++;              /* skip next argument */
+        } else if (retd == 1) {
             /* We have our own verbosity in addition to `flags'. */
             if (cmdline_verbose())
                 verbose = true;
-        } else if (strcmp(argv[i], "-h") == 0 ||
-                   strcmp(argv[i], "-?") == 0 ||
-                   strcmp(argv[i], "--help") == 0) {
+        } else if (strcmp(argstr, "-h") == 0 ||
+                   strcmp(argstr, "-?") == 0 ||
+                   strcmp(argstr, "--help") == 0) {
             usage();
-        } else if (strcmp(argv[i], "-pgpfp") == 0) {
+            cleanup_exit(0);
+        } else if (strcmp(argstr, "-pgpfp") == 0) {
             pgp_fingerprints();
-            return 1;
-        } else if (strcmp(argv[i], "-V") == 0 ||
-                   strcmp(argv[i], "--version") == 0) {
+            return 0;
+        } else if (strcmp(argstr, "-V") == 0 ||
+                   strcmp(argstr, "--version") == 0) {
             version();
-        } else if (strcmp(argv[i], "-batch") == 0) {
-            console_batch_mode = true;
-        } else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
+        } else if (strcmp(argstr, "-b") == 0 && nextarg) {
             mode = 1;
-            batchfile = argv[++i];
-        } else if (strcmp(argv[i], "-bc") == 0) {
+            batchfile = cmdline_arg_to_filename(nextarg);
+            arglistpos++;
+        } else if (strcmp(argstr, "-bc") == 0) {
             modeflags = modeflags | 1;
-        } else if (strcmp(argv[i], "-be") == 0) {
+        } else if (strcmp(argstr, "-be") == 0) {
             modeflags = modeflags | 2;
-        } else if (strcmp(argv[i], "-sanitise-stderr") == 0) {
+        } else if (strcmp(argstr, "-sanitise-stderr") == 0) {
             sanitise_stderr = true;
-        } else if (strcmp(argv[i], "-no-sanitise-stderr") == 0) {
+        } else if (strcmp(argstr, "-no-sanitise-stderr") == 0) {
             sanitise_stderr = false;
-        } else if (strcmp(argv[i], "--") == 0) {
-            i++;
+        } else if (strcmp(argstr, "--") == 0) {
+            arglistpos++;
             break;
         } else {
-            cmdline_error("unknown option \"%s\"", argv[i]);
+            cmdline_error("unknown option \"%s\"", argstr);
         }
     }
-    argc -= i;
-    argv += i;
     backend = NULL;
 
     stdio_sink_init(&stderr_ss, stderr);
@@ -2874,10 +2888,10 @@ int psftp_main(int argc, char *argv[])
      * it now.
      */
     if (userhost) {
-        int ret;
-        ret = psftp_connect(userhost, user, portnumber);
+        int retd;
+        retd = psftp_connect(userhost, user, portnumber);
         sfree(userhost);
-        if (ret)
+        if (retd)
             return 1;
         if (do_sftp_init())
             return 1;
@@ -2886,7 +2900,9 @@ int psftp_main(int argc, char *argv[])
                " to connect\n");
     }
 
-    ret = do_sftp(mode, modeflags, batchfile);
+    cmdline_arg_list_free(arglist);
+
+    toret = do_sftp(mode, modeflags, batchfile);
 
     if (backend && backend_connected(backend)) {
         char ch;
@@ -2905,5 +2921,5 @@ int psftp_main(int argc, char *argv[])
     if (psftp_logctx)
         log_free(psftp_logctx);
 
-    return ret;
+    return toret;
 }

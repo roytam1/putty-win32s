@@ -1,5 +1,5 @@
 /*
- * scp.c  -  Scp (Secure Copy) client for PuTTY.
+ * pscp.c  -  Scp (Secure Copy) client for PuTTY.
  * Joris van Rantwijk, Simon Tatham
  *
  * This is mainly based on ssh-1.2.26/scp.c by Timo Rinne & Tatu Ylonen.
@@ -22,7 +22,7 @@
 #include "putty.h"
 #include "psftp.h"
 #include "ssh.h"
-#include "sftp.h"
+#include "ssh/sftp.h"
 #include "storage.h"
 
 static bool list = false;
@@ -49,8 +49,6 @@ static void source(const char *src);
 static void rsource(const char *src);
 static void sink(const char *targ, const char *src);
 
-const char *const appname = "PSCP";
-
 /*
  * The maximum amount of queued data we accept before we stop and
  * wait for the server to process some.
@@ -58,29 +56,38 @@ const char *const appname = "PSCP";
 #define MAX_SCP_BUFSIZE 16384
 
 void ldisc_echoedit_update(Ldisc *ldisc) { }
+void ldisc_check_sendok(Ldisc *ldisc) { }
 
-static size_t pscp_output(Seat *, bool is_stderr, const void *, size_t);
+static size_t pscp_output(Seat *, SeatOutputType type, const void *, size_t);
 static bool pscp_eof(Seat *);
 
 static const SeatVtable pscp_seat_vt = {
     .output = pscp_output,
     .eof = pscp_eof,
+    .sent = nullseat_sent,
+    .banner = nullseat_banner_to_stderr,
     .get_userpass_input = filexfer_get_userpass_input,
+    .notify_session_started = nullseat_notify_session_started,
     .notify_remote_exit = nullseat_notify_remote_exit,
+    .notify_remote_disconnect = nullseat_notify_remote_disconnect,
     .connection_fatal = console_connection_fatal,
+    .nonfatal = console_nonfatal,
     .update_specials_menu = nullseat_update_specials_menu,
     .get_ttymode = nullseat_get_ttymode,
     .set_busy_status = nullseat_set_busy_status,
-    .verify_ssh_host_key = console_verify_ssh_host_key,
+    .confirm_ssh_host_key = console_confirm_ssh_host_key,
     .confirm_weak_crypto_primitive = console_confirm_weak_crypto_primitive,
     .confirm_weak_cached_hostkey = console_confirm_weak_cached_hostkey,
+    .prompt_descriptions = console_prompt_descriptions,
     .is_utf8 = nullseat_is_never_utf8,
     .echoedit_update = nullseat_echoedit_update,
     .get_x_display = nullseat_get_x_display,
     .get_windowid = nullseat_get_windowid,
     .get_window_pixel_size = nullseat_get_window_pixel_size,
     .stripctrl_new = console_stripctrl_new,
-    .set_trust_status = nullseat_set_trust_status_vacuously,
+    .set_trust_status = nullseat_set_trust_status,
+    .can_set_trust_status = nullseat_can_set_trust_status_yes,
+    .has_mixed_input_stream = nullseat_has_mixed_input_stream_no,
     .verbose = cmdline_seat_verbose,
     .interactive = nullseat_interactive_no,
     .get_cursor_position = nullseat_get_cursor_position,
@@ -141,13 +148,14 @@ static PRINTF_LIKE(2, 3) void tell_user(FILE *stream, const char *fmt, ...)
 static bufchain received_data;
 static BinarySink *stderr_bs;
 static size_t pscp_output(
-    Seat *seat, bool is_stderr, const void *data, size_t len)
+    Seat *seat, SeatOutputType type, const void *data, size_t len)
 {
     /*
-     * stderr data is just spouted to local stderr (optionally via a
-     * sanitiser) and otherwise ignored.
+     * Non-stdout data (both stderr and SSH auth banners) is just
+     * spouted to local stderr (optionally via a sanitiser) and
+     * otherwise ignored.
      */
-    if (is_stderr) {
+    if (type != SEAT_OUTPUT_STDOUT) {
         put_data(stderr_bs, data, len);
         return 0;
     }
@@ -383,7 +391,7 @@ static void do_cmd(char *host, char *user, char *cmd)
     /* Set username */
     if (user != NULL && user[0] != '\0') {
         conf_set_str(conf, CONF_username, user);
-    } else if (conf_get_str(conf, CONF_username)[0] == '\0') {
+    } else if (conf_get_str_ambi(conf, CONF_username, NULL)[0] == '\0') {
         user = get_username();
         if (!user)
             bump("Empty user name");
@@ -527,10 +535,20 @@ static void print_stats(const char *name, uint64_t size, uint64_t done,
 }
 
 /*
- *  Find a colon in str and return a pointer to the colon.
- *  This is used to separate hostname from filename.
+ * Find a colon in str and return a pointer to the colon.
+ * This is used to separate hostname from filename.
+ *
+ * Colons in bracketed IPv6 address literals are ignored, because
+ * they're logically part of the hostname.
+ *
+ * Like strchr in the C standard library, we accept a const char * as
+ * input, and produce a mutable char * as output. The intention is
+ * that you EITHER pass a mutable char * input and use the mutability
+ * of the output, OR pass a const char * as input and don't use the
+ * mutability, but don't use this to silently launder consts off
+ * things.
  */
-static char *colon(char *str)
+static char *colon(const char *str)
 {
     /* We ignore a leading colon, since the hostname cannot be
        empty. We also ignore a colon as second character because
@@ -540,7 +558,7 @@ static char *colon(char *str)
         return (NULL);
     str += host_strcspn(str, ":/\\");
     if (*str == ':')
-        return (str);
+        return (char *)str;
     else
         return (NULL);
 }
@@ -638,8 +656,8 @@ void scp_sftp_listdir(const char *dirname)
     dirh = fxp_opendir_recv(pktin, req);
 
     if (dirh == NULL) {
-                tell_user(stderr, "Unable to open %s: %s\n", dirname, fxp_error());
-                errs++;
+        tell_user(stderr, "Unable to open %s: %s\n", dirname, fxp_error());
+        errs++;
     } else {
         struct list_directory_from_sftp_ctx *ctx =
             list_directory_from_sftp_new();
@@ -848,7 +866,8 @@ int scp_send_filedata(char *data, int len)
         scp_sftp_fileoffset += len;
         return 0;
     } else {
-        int bufsize = backend_send(backend, data, len);
+        backend_send(backend, data, len);
+        int bufsize = backend_sendbuffer(backend);
 
         /*
          * If the network transfer is backing up - that is, the
@@ -1806,7 +1825,7 @@ static void sink(const char *targ, const char *src)
             striptarget = stripslashes(act.name, true);
             if (striptarget != act.name) {
                 with_stripctrl(sanname, act.name) {
-                    with_stripctrl(santarg, act.name) {
+                    with_stripctrl(santarg, striptarget) {
                         tell_user(stderr, "warning: remote host sent a"
                                   " compound pathname '%s'", sanname);
                         tell_user(stderr, "         renaming local"
@@ -1957,16 +1976,16 @@ static void sink(const char *targ, const char *src)
 /*
  * We will copy local files to a remote server.
  */
-static void toremote(int argc, char *argv[])
+static void toremote(CmdlineArg **args, size_t nargs)
 {
-    char *src, *wtarg, *host, *user;
-    const char *targ;
+    char *wtarg, *host, *user;
+    const char *src, *targ;
     char *cmd;
-    int i, wc_type;
+    int wc_type;
 
     uploading = true;
 
-    wtarg = argv[argc - 1];
+    wtarg = dupstr(cmdline_arg_to_str(args[nargs - 1]));
 
     /* Separate host from filename */
     host = wtarg;
@@ -1992,13 +2011,14 @@ static void toremote(int argc, char *argv[])
             user = NULL;
     }
 
-    if (argc == 2) {
-        if (colon(argv[0]) != NULL)
-            bump("%s: Remote to remote not supported", argv[0]);
+    if (nargs == 2) {
+        const char *arg0 = cmdline_arg_to_str(args[0]);
+        if (colon(arg0) != NULL)
+            bump("%s: Remote to remote not supported", arg0);
 
-        wc_type = test_wildcard(argv[0], true);
+        wc_type = test_wildcard(arg0, true);
         if (wc_type == WCTYPE_NONEXISTENT)
-            bump("%s: No such file or directory\n", argv[0]);
+            bump("%s: No such file or directory\n", arg0);
         else if (wc_type == WCTYPE_WILDCARD)
             targetshouldbedirectory = true;
     }
@@ -2014,8 +2034,8 @@ static void toremote(int argc, char *argv[])
     if (scp_source_setup(targ, targetshouldbedirectory))
         return;
 
-    for (i = 0; i < argc - 1; i++) {
-        src = argv[i];
+    for (size_t i = 0; i < nargs - 1; i++) {
+        src = cmdline_arg_to_str(args[i]);
         if (colon(src) != NULL) {
             tell_user(stderr, "%s: Remote to remote not supported\n", src);
             errs++;
@@ -2052,19 +2072,19 @@ static void toremote(int argc, char *argv[])
 /*
  *  We will copy files from a remote server to the local machine.
  */
-static void tolocal(int argc, char *argv[])
+static void tolocal(CmdlineArg **args, size_t nargs)
 {
-    char *wsrc, *host, *user;
+    char *wsrc_orig, *wsrc, *host, *user;
     const char *src, *targ;
     char *cmd;
 
     uploading = false;
 
-    if (argc != 2)
+    if (nargs != 2)
         bump("More than one remote source not supported");
 
-    wsrc = argv[0];
-    targ = argv[1];
+    wsrc = wsrc_orig = dupstr(cmdline_arg_to_str(args[0]));
+    targ = cmdline_arg_to_str(args[1]);
 
     /* Separate host from filename */
     host = wsrc;
@@ -2102,20 +2122,20 @@ static void tolocal(int argc, char *argv[])
         return;
 
     sink(targ, src);
+    sfree(wsrc_orig);
 }
 
 /*
  *  We will issue a list command to get a remote directory.
  */
-static void get_dir_list(int argc, char *argv[])
+static void get_dir_list(CmdlineArg **args, size_t nargs)
 {
-    char *wsrc, *host, *user;
+    char *wsrc_orig, *wsrc, *host, *user;
     const char *src;
-    char *cmd, *p;
     const char *q;
     char c;
 
-    wsrc = argv[0];
+    wsrc = wsrc_orig = dupstr(cmdline_arg_to_str(args[0]));
 
     /* Separate host from filename */
     host = wsrc;
@@ -2141,24 +2161,18 @@ static void get_dir_list(int argc, char *argv[])
             user = NULL;
     }
 
-    cmd = snewn(4 * strlen(src) + 100, char);
-    strcpy(cmd, "ls -la '");
-    p = cmd + strlen(cmd);
+    strbuf *cmd = strbuf_new();
+    put_datalit(cmd, "ls -la '");
     for (q = src; *q; q++) {
-        if (*q == '\'') {
-            *p++ = '\'';
-            *p++ = '\\';
-            *p++ = '\'';
-            *p++ = '\'';
-        } else {
-            *p++ = *q;
-        }
+        if (*q == '\'')
+            put_datalit(cmd, "'\\''");
+        else
+            put_byte(cmd, *q);
     }
-    *p++ = '\'';
-    *p = '\0';
+    put_datalit(cmd, "'");
 
-    do_cmd(host, user, cmd);
-    sfree(cmd);
+    do_cmd(host, user, cmd->s);
+    strbuf_free(cmd);
 
     if (using_sftp) {
         scp_sftp_listdir(src);
@@ -2171,6 +2185,8 @@ static void get_dir_list(int argc, char *argv[])
             put_byte(scc, c);
         stripctrl_free(scc);
     }
+
+    sfree(wsrc_orig);
 }
 
 /*
@@ -2181,8 +2197,7 @@ static void usage(void)
     printf("PuTTY Secure Copy client\n");
     printf("%s\n", ver);
     printf("Usage: pscp [options] [user@]host:source target\n");
-    printf
-        ("       pscp [options] source [source...] [user@]host:target\n");
+    printf("       pscp [options] source [source...] [user@]host:target\n");
     printf("       pscp [options] -ls [user@]host:filespec\n");
     printf("Options:\n");
     printf("  -V        print version information and exit\n");
@@ -2194,7 +2209,7 @@ static void usage(void)
     printf("  -load sessname  Load settings from saved session\n");
     printf("  -P port   connect to specified port\n");
     printf("  -l user   connect with specified username\n");
-    printf("  -pw passw login with specified password\n");
+    printf("  -pwfile file   login with password read from specified file\n");
     printf("  -1 -2     force use of particular SSH protocol version\n");
     printf("  -ssh -ssh-connection\n");
     printf("            force use of particular SSH protocol variant\n");
@@ -2221,7 +2236,6 @@ static void usage(void)
     printf("  -logoverwrite\n");
     printf("  -logappend\n");
     printf("            control what happens when a log file already exists\n");
-    cleanup_exit(1);
 }
 
 void version(void)
@@ -2239,7 +2253,7 @@ void cmdline_error(const char *p, ...)
     va_start(ap, p);
     vfprintf(stderr, p, ap);
     va_end(ap);
-    fprintf(stderr, "\n      try typing just \"pscp\" for help\n");
+    fprintf(stderr, "\n      try typing \"pscp -h\" for help\n");
     exit(1);
 }
 
@@ -2255,69 +2269,71 @@ const unsigned cmdline_tooltype = TOOLTYPE_FILETRANSFER;
  * Main program. (Called `psftp_main' because it gets called from
  * *sftp.c; bit silly, I know, but it had to be called _something_.)
  */
-int psftp_main(int argc, char *argv[])
+int psftp_main(CmdlineArgList *arglist)
 {
-    int i;
     bool sanitise_stderr = true;
 
     sk_init();
+    enable_dit();
 
     /* Load Default Settings before doing anything else. */
     conf = conf_new();
     do_defaults(NULL, conf);
 
-    for (i = 1; i < argc; i++) {
-        int ret;
-        if (argv[i][0] != '-')
+    size_t arglistpos = 0;
+    while (arglist->args[arglistpos]) {
+        CmdlineArg *arg = arglist->args[arglistpos++];
+        CmdlineArg *nextarg = arglist->args[arglistpos];
+        const char *argstr = cmdline_arg_to_str(arg);
+        if (argstr[0] != '-') {
+            arglistpos--; /* logically push that argument back on the list */
             break;
-        ret = cmdline_process_param(argv[i], i+1<argc?argv[i+1]:NULL, 1, conf);
+        }
+        int ret = cmdline_process_param(arg, nextarg, 1, conf);
         if (ret == -2) {
-            cmdline_error("option \"%s\" requires an argument", argv[i]);
+            cmdline_error("option \"%s\" requires an argument", argstr);
         } else if (ret == 2) {
-            i++;               /* skip next argument */
+            arglistpos++;              /* skip next argument */
         } else if (ret == 1) {
             /* We have our own verbosity in addition to `flags'. */
             if (cmdline_verbose())
                 verbose = true;
-        } else if (strcmp(argv[i], "-pgpfp") == 0) {
+        } else if (strcmp(argstr, "-pgpfp") == 0) {
             pgp_fingerprints();
-            return 1;
-        } else if (strcmp(argv[i], "-r") == 0) {
+            return 0;
+        } else if (strcmp(argstr, "-r") == 0) {
             recursive = true;
-        } else if (strcmp(argv[i], "-p") == 0) {
+        } else if (strcmp(argstr, "-p") == 0) {
             preserve = true;
-        } else if (strcmp(argv[i], "-q") == 0) {
+        } else if (strcmp(argstr, "-q") == 0) {
             statistics = false;
-        } else if (strcmp(argv[i], "-h") == 0 ||
-                   strcmp(argv[i], "-?") == 0 ||
-                   strcmp(argv[i], "--help") == 0) {
+        } else if (strcmp(argstr, "-h") == 0 ||
+                   strcmp(argstr, "-?") == 0 ||
+                   strcmp(argstr, "--help") == 0) {
             usage();
-        } else if (strcmp(argv[i], "-V") == 0 ||
-                   strcmp(argv[i], "--version") == 0) {
+            cleanup_exit(0);
+        } else if (strcmp(argstr, "-V") == 0 ||
+                   strcmp(argstr, "--version") == 0) {
             version();
-        } else if (strcmp(argv[i], "-ls") == 0) {
+        } else if (strcmp(argstr, "-ls") == 0) {
             list = true;
-        } else if (strcmp(argv[i], "-batch") == 0) {
-            console_batch_mode = true;
-        } else if (strcmp(argv[i], "-unsafe") == 0) {
+        } else if (strcmp(argstr, "-unsafe") == 0) {
             scp_unsafe_mode = true;
-        } else if (strcmp(argv[i], "-sftp") == 0) {
+        } else if (strcmp(argstr, "-sftp") == 0) {
             try_scp = false; try_sftp = true;
-        } else if (strcmp(argv[i], "-scp") == 0) {
+        } else if (strcmp(argstr, "-scp") == 0) {
             try_scp = true; try_sftp = false;
-        } else if (strcmp(argv[i], "-sanitise-stderr") == 0) {
+        } else if (strcmp(argstr, "-sanitise-stderr") == 0) {
             sanitise_stderr = true;
-        } else if (strcmp(argv[i], "-no-sanitise-stderr") == 0) {
+        } else if (strcmp(argstr, "-no-sanitise-stderr") == 0) {
             sanitise_stderr = false;
-        } else if (strcmp(argv[i], "--") == 0) {
-            i++;
+        } else if (strcmp(argstr, "--") == 0) {
+            arglistpos++;
             break;
         } else {
-            cmdline_error("unknown option \"%s\"", argv[i]);
+            cmdline_error("unknown option \"%s\"", argstr);
         }
     }
-    argc -= i;
-    argv += i;
     backend = NULL;
 
     stdio_sink_init(&stderr_ss, stderr);
@@ -2329,22 +2345,26 @@ int psftp_main(int argc, char *argv[])
 
     string_scc = stripctrl_new(NULL, false, L'\0');
 
+    CmdlineArg **scpargs = arglist->args + arglistpos;
+    size_t nscpargs = 0;
+    while (scpargs[nscpargs])
+        nscpargs++;
+
     if (list) {
-        if (argc != 1)
-            usage();
-        get_dir_list(argc, argv);
+        if (nscpargs != 1)
+            cmdline_error("expected a single argument with -ls");
+        get_dir_list(scpargs, nscpargs);
 
     } else {
-
-        if (argc < 2)
-            usage();
-        if (argc > 2)
+        if (nscpargs < 2)
+            cmdline_error("expected at least two arguments");
+        if (nscpargs > 2)
             targetshouldbedirectory = true;
 
-        if (colon(argv[argc - 1]) != NULL)
-            toremote(argc, argv);
+        if (colon(cmdline_arg_to_str(scpargs[nscpargs - 1])) != NULL)
+            toremote(scpargs, nscpargs);
         else
-            tolocal(argc, argv);
+            tolocal(scpargs, nscpargs);
     }
 
     if (backend && backend_connected(backend)) {
@@ -2356,6 +2376,7 @@ int psftp_main(int argc, char *argv[])
     random_save_seed();
 
     cmdline_cleanup();
+    cmdline_arg_list_free(arglist);
     if (backend) {
         backend_free(backend);
         backend = NULL;

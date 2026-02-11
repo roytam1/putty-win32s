@@ -112,11 +112,22 @@ exec\ 0<>/dev/ttyS0\ 1>&0\ 2>/dev/console
 stty\ raw\ \-echo
 \fI#\ Choose\ what\ shell\ you\ want\ to\ run\ inside\ psusan\fP
 export\ SHELL=/bin/bash
+\fI#\ Set\ up\ a\ default\ path\fP
+export\ PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
 \fI#\ And\ now\ run\ psusan\ over\ the\ serial\ port\fP
 exec\ /home/simon/src/putty/misc/psusan
 .fi
 .PP
-Now set up a PuTTY saved session as in the Docker example above, using that \fBlinux\fP command as the local proxy command, and you\*(Aqll have a PuTTY session that starts up a clean UML instance when you run it, and (if you enabled connection sharing) further instances of the same session will connect to the same instance again.
+Now set up a PuTTY saved session as in the Docker example above. Basically you'll want to use the above \fBlinux\fP command as the local proxy command. However, it\*(Aqs worth wrapping it in \fBsetsid\fP(\fI1\fP), because when UML terminates, it kills its entire process group. So it\*(Aqs better that PuTTY should not be part of that group, and should have the opportunity to shut down cleanly by itself. So probably you end up setting the proxy command to be something more like:
+.PP
+.nf
+setsid\ linux\ mem=512M\ rootfstype=hostfs\ rootflags=/\ rw\ \e
+\ \ \ \ con=fd:2,fd:2\ ssl0=fd:0,fd:1\ init=\fI/some/path/to/uml\-psusan.sh\fP
+.fi
+.PP
+You may also find that you have to enable the bug workaround that indicates that the server `Discards data sent before its greeting', because otherwise PuTTY's outgoing protocol greeting can be accidentally lost during UML startup. (See Debian bug #991958.)
+.PP
+Once you've done that, you'll have a PuTTY session that starts up a clean UML instance when you run it, and (if you enabled connection sharing) further instances of the same session will connect to the same instance again.
 .SS "Windows Subsystem for Linux"
 .PP
 On Windows, the default way to use WSL is to run the \fBwsl\fP program, or one of its aliases, in a Windows console, either by launching it from an existing command prompt, or by using a shortcut that opens it in a fresh console. This gives you a Linux terminal environment, but in a Windows console window.
@@ -130,6 +141,21 @@ enter the name of a particular WSL distribution in the host name box. (For examp
 set the protocol to `Bare ssh-connection', as usual.
 .PP
 Like all the other examples here, this also permits you to forward ports in and out of the WSL environment (e.g. expose a WSL2 network service through the hypervisor's internal NAT), forward Pageant into it, and so on.
+.SS "Cygwin"
+.PP
+Another Unix-like environment on Windows is Cygwin. That comes with its own GUI terminal application, \fBmintty\fP (as it happens, a derivative of PuTTY); but if you\*(Aqd prefer to use PuTTY itself to talk to your Cygwin terminal sessions, \fBpsusan\fP can help.
+.PP
+To do this, you'll first need to build the Unix PuTTY tools inside Cygwin (via the usual \fBcmake\fP method). Then, copy the resulting \fBpsusan.exe\fP into Cygwin\*(Aqs \fB/bin\fP directory. (It has to be in that directory for non-Cygwin programs to run it; otherwise it won\*(Aqt be able to find the Cygwin DLL at startup.)
+.PP
+Then set up your PuTTY saved session like this:
+.IP "\fB\(bu\fP"
+set the local proxy command to run \fBpsusan.exe\fP via its real Windows path. You might also want to add the \fB--sessiondir\fP option so that shell sessions start up in your Cygwin home directory. For example, you might use the command `\fBc:\ecygwin64\ebin\epsusan.exe --sessiondir /home/simon\fP' (changing the pathname and username to match your setup).
+.IP "\fB\(bu\fP"
+enter anything you like in the host name box; `\fBCygwin\fP' is probably a good choice
+.IP "\fB\(bu\fP"
+set the protocol to `Bare ssh-connection', as usual.
+.PP
+Port forwarding is probably not particularly useful in this case, since Cygwin shares the same network port space as the host machine. But turning on agent forwarding is useful, because then the Cygwin command-line SSH client can talk to Pageant without any further configuration.
 .SS "\fBschroot\fP"
 .PP
 Another example of a container-like environment is the alternative filesystem layout set up by \fBschroot\fP(\fI1\fP).

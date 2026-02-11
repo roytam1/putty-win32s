@@ -31,7 +31,7 @@
 #define NPRIORITIES 2
 
 struct cmdline_saved_param {
-    char *p, *value;
+    CmdlineArg *p, *value;
 };
 struct cmdline_saved_param_set {
     struct cmdline_saved_param *params;
@@ -44,11 +44,11 @@ struct cmdline_saved_param_set {
  */
 static struct cmdline_saved_param_set saves[NPRIORITIES];
 
-static void cmdline_save_param(const char *p, const char *value, int pri)
+static void cmdline_save_param(CmdlineArg *p, CmdlineArg *value, int pri)
 {
     sgrowarray(saves[pri].params, saves[pri].savesize, saves[pri].nsaved);
-    saves[pri].params[saves[pri].nsaved].p = dupstr(p);
-    saves[pri].params[saves[pri].nsaved].value = dupstr(value);
+    saves[pri].params[saves[pri].nsaved].p = p;
+    saves[pri].params[saves[pri].nsaved].value = value;
     saves[pri].nsaved++;
 }
 
@@ -73,46 +73,72 @@ void cmdline_cleanup(void)
 }
 
 #define SAVEABLE(pri) do { \
-    if (need_save) { cmdline_save_param(p, value, pri); return ret; } \
+    if (need_save) { cmdline_save_param(arg, nextarg, pri); return ret; }   \
 } while (0)
 
 /*
  * Similar interface to seat_get_userpass_input(), except that here a
- * -1 return means that we aren't capable of processing the prompt and
- * someone else should do it.
+ * SPR(K)_INCOMPLETE return means that we aren't capable of processing
+ * the prompt and someone else should do it.
  */
-int cmdline_get_passwd_input(prompts_t *p)
+SeatPromptResult cmdline_get_passwd_input(
+    prompts_t *p, cmdline_get_passwd_input_state *state, bool restartable)
 {
-    static bool tried_once = false;
-
     /*
      * We only handle prompts which don't echo (which we assume to be
      * passwords), and (currently) we only cope with a password prompt
-     * that comes in a prompt-set on its own.
+     * that comes in a prompt-set on its own. Also, we don't use a
+     * command-line password for any kind of prompt which is destined
+     * for local use rather than to be sent to the server: the idea is
+     * to pre-fill _passwords_, not private-key passphrases (for which
+     * there are better alternatives available).
      */
-    if (!cmdline_password || p->n_prompts != 1 || p->prompts[0]->echo) {
-        return -1;
+    if (p->n_prompts != 1 || p->prompts[0]->echo || !p->to_server) {
+        return SPR_INCOMPLETE;
     }
 
     /*
      * If we've tried once, return utter failure (no more passwords left
      * to try).
      */
-    if (tried_once)
-        return 0;
+    if (state->tried)
+        return SPR_SW_ABORT("Configured password was not accepted");
+
+    /*
+     * If we never had a password available in the first place, we
+     * can't do anything in any case. (But we delay this test until
+     * after trying once, so that even if we free cmdline_password
+     * below, we'll still remember that we _used_ to have one.)
+     */
+    if (!cmdline_password)
+        return SPR_INCOMPLETE;
 
     prompt_set_result(p->prompts[0], cmdline_password);
-    smemclr(cmdline_password, strlen(cmdline_password));
-    sfree(cmdline_password);
-    cmdline_password = NULL;
-    tried_once = true;
-    return 1;
+    state->tried = true;
+
+    if (!restartable) {
+        /*
+         * If there's no possibility of needing to do this again after
+         * a 'Restart Session' event, then wipe our copy of the
+         * password out of memory.
+         */
+        smemclr(cmdline_password, strlen(cmdline_password));
+        sfree(cmdline_password);
+        cmdline_password = NULL;
+    }
+
+    return SPR_OK;
+}
+
+static void cmdline_report_unavailable(const char *p)
+{
+    cmdline_error("option \"%s\" not available in this tool", p);
 }
 
 static bool cmdline_check_unavailable(int flag, const char *p)
 {
     if (cmdline_tooltype & flag) {
-        cmdline_error("option \"%s\" not available in this tool", p);
+        cmdline_report_unavailable(p);
         return true;
     }
     return false;
@@ -164,10 +190,13 @@ static void set_port(Conf *conf, int port)
     conf_set_int(conf, CONF_port, port);
 }
 
-int cmdline_process_param(const char *p, char *value,
+int cmdline_process_param(CmdlineArg *arg, CmdlineArg *nextarg,
                           int need_save, Conf *conf)
 {
     int ret = 0;
+    const char *p = cmdline_arg_to_str(arg);
+    const char *value_utf8 = cmdline_arg_to_utf8(nextarg);
+    const char *value = cmdline_arg_to_str(nextarg);
 
     if (p[0] != '-') {
         if (need_save < 0)
@@ -382,9 +411,8 @@ int cmdline_process_param(const char *p, char *value,
              * pretend we received a -P argument, so that it will be
              * deferred until it's a good moment to run it.
              */
-            char *dup = dupstr(p);     /* 'value' is not a const char * */
-            int retd = cmdline_process_param("-P", dup, 1, conf);
-            sfree(dup);
+            int retd = cmdline_process_param(
+                cmdline_arg_from_str(arg->list, "-P"), arg, 1, conf);
             assert(retd == 2);
             seen_port_argument = true;
             return 1;
@@ -432,7 +460,10 @@ int cmdline_process_param(const char *p, char *value,
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        conf_set_str(conf, CONF_username, value);
+        if (value_utf8)
+            conf_set_utf8(conf, CONF_username, value_utf8);
+        else
+            conf_set_str(conf, CONF_username, value);
     }
     if (!strcmp(p, "-loghost")) {
         RETURN(2);
@@ -532,20 +563,23 @@ int cmdline_process_param(const char *p, char *value,
         sfree(host);
     }
     if (!strcmp(p, "-m")) {
-        const char *filename;
+        Filename *filename;
         FILE *fp;
 
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER | TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
 
-        filename = value;
+        filename = cmdline_arg_to_filename(nextarg);
 
-        fp = fopen(filename, "r");
+        fp = f_open(filename, "r", false);
         if (!fp) {
-            cmdline_error("unable to open command file \"%s\"", filename);
+            cmdline_error("unable to open command file \"%s\"",
+                          filename_to_str(filename));
+            filename_free(filename);
             return ret;
         }
+        filename_free(filename);
         strbuf *command = strbuf_new();
         char readbuf[4096];
         while (1) {
@@ -576,11 +610,45 @@ int cmdline_process_param(const char *p, char *value,
             cmdline_error("the -pw option can only be used with the "
                           "SSH protocol");
         else {
+            if (cmdline_password) {
+                smemclr(cmdline_password, strlen(cmdline_password));
+                sfree(cmdline_password);
+            }
+
             cmdline_password = dupstr(value);
-            /* Assuming that `value' is directly from argv, make a good faith
-             * attempt to trample it, to stop it showing up in `ps' output
-             * on Unix-like systems. Not guaranteed, of course. */
-            smemclr(value, strlen(value));
+        }
+
+        cmdline_arg_wipe(nextarg);
+    }
+
+    if (!strcmp(p, "-pwfile")) {
+        RETURN(2);
+        UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
+        SAVEABLE(1);
+        /* We delay evaluating this until after the protocol is decided,
+         * so that we can warn if it's of no use with the selected protocol */
+        if (conf_get_int(conf, CONF_protocol) != PROT_SSH)
+            cmdline_error("the -pwfile option can only be used with the "
+                          "SSH protocol");
+        else {
+            Filename *fn = cmdline_arg_to_filename(nextarg);
+            FILE *fp = f_open(fn, "r", false);
+            if (!fp) {
+                cmdline_error("unable to open password file '%s'", value);
+            } else {
+                if (cmdline_password) {
+                    smemclr(cmdline_password, strlen(cmdline_password));
+                    sfree(cmdline_password);
+                }
+
+                cmdline_password = chomp(fgetline(fp));
+                if (!cmdline_password) {
+                    cmdline_error("unable to read a password from file '%s'",
+                                  value);
+                }
+                fclose(fp);
+            }
+            filename_free(fn);
         }
     }
 
@@ -685,27 +753,37 @@ int cmdline_process_param(const char *p, char *value,
     }
 
     if (!strcmp(p, "-i")) {
-        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        fn = filename_from_str(value);
+        Filename *fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_keyfile, fn);
+        filename_free(fn);
+    }
+
+    if (!strcmp(p, "-cert")) {
+        RETURN(2);
+        UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
+        SAVEABLE(0);
+        Filename *fn = cmdline_arg_to_filename(nextarg);
+        conf_set_filename(conf, CONF_detached_cert, fn);
         filename_free(fn);
     }
 
     if (!strcmp(p, "-4") || !strcmp(p, "-ipv4")) {
         RETURN(1);
+        UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
         conf_set_int(conf, CONF_addressfamily, ADDRTYPE_IPV4);
     }
     if (!strcmp(p, "-6") || !strcmp(p, "-ipv6")) {
         RETURN(1);
+        UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
         conf_set_int(conf, CONF_addressfamily, ADDRTYPE_IPV6);
     }
     if (!strcmp(p, "-sercfg")) {
-        char* nextitem;
+        const char *nextitem;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER | TOOLTYPE_NONNETWORK);
         SAVEABLE(1);
@@ -722,7 +800,6 @@ int cmdline_process_param(const char *p, char *value,
                 skip = 0;
             } else {
                 length = end - nextitem;
-                nextitem[length] = '\0';
                 skip = 1;
             }
             if (length == 1) {
@@ -777,7 +854,9 @@ int cmdline_process_param(const char *p, char *value,
                 /* Messy special case */
                 conf_set_int(conf, CONF_serstopbits, 3);
             } else {
-                int serspeed = atoi(nextitem);
+                char *speedstr = dupprintf("%.*s", length, nextitem);
+                int serspeed = atoi(speedstr);
+                sfree(speedstr);
                 if (serspeed != 0) {
                     conf_set_int(conf, CONF_serspeed, serspeed);
                 } else {
@@ -790,12 +869,11 @@ int cmdline_process_param(const char *p, char *value,
     }
 
     if (!strcmp(p, "-sessionlog")) {
-        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER);
         /* but available even in TOOLTYPE_NONNETWORK, cf pterm "-log" */
         SAVEABLE(0);
-        fn = filename_from_str(value);
+        Filename *fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_logfilename, fn);
         conf_set_int(conf, CONF_logtype, LGTYP_DEBUG);
         filename_free(fn);
@@ -803,11 +881,10 @@ int cmdline_process_param(const char *p, char *value,
 
     if (!strcmp(p, "-sshlog") ||
         !strcmp(p, "-sshrawlog")) {
-        Filename *fn;
         RETURN(2);
         UNAVAILABLE_IN(TOOLTYPE_NONNETWORK);
         SAVEABLE(0);
-        fn = filename_from_str(value);
+        Filename *fn = cmdline_arg_to_filename(nextarg);
         conf_set_filename(conf, CONF_logfilename, fn);
         conf_set_int(conf, CONF_logtype,
                      !strcmp(p, "-sshlog") ? LGTYP_PACKETS :
@@ -837,6 +914,33 @@ int cmdline_process_param(const char *p, char *value,
         conf_set_str(conf, CONF_proxy_telnet_command, value);
     }
 
+    if (!strcmp(p, "-batch")) {
+        RETURN(1);
+        SAVEABLE(0);
+        if (!console_set_batch_mode(true)) {
+            cmdline_report_unavailable(p);
+            return ret;
+        }
+    }
+
+    if (!strcmp(p, "-legacy-stdio-prompts") ||
+        !strcmp(p, "-legacy_stdio_prompts")) {
+        RETURN(1);
+        if (!console_set_stdio_prompts(true)) {
+            cmdline_report_unavailable(p);
+            return ret;
+        }
+    }
+
+    if (!strcmp(p, "-legacy-charset-handling") ||
+        !strcmp(p, "-legacy_charset_handling")) {
+        RETURN(1);
+        if (!set_legacy_charset_handling(true)) {
+            cmdline_report_unavailable(p);
+            return ret;
+        }
+    }
+
 #ifdef _WINDOWS
     /*
      * Cross-tool options only available on Windows.
@@ -854,12 +958,9 @@ int cmdline_process_param(const char *p, char *value,
 void cmdline_run_saved(Conf *conf)
 {
     for (size_t pri = 0; pri < NPRIORITIES; pri++) {
-        for (size_t i = 0; i < saves[pri].nsaved; i++) {
+        for (size_t i = 0; i < saves[pri].nsaved; i++)
             cmdline_process_param(saves[pri].params[i].p,
                                   saves[pri].params[i].value, 0, conf);
-            sfree(saves[pri].params[i].p);
-            sfree(saves[pri].params[i].value);
-        }
         saves[pri].nsaved = 0;
     }
 }
