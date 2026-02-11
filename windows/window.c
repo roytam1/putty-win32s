@@ -4531,6 +4531,15 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
             }
             return 0;
         }
+#ifdef WIN32S_COMPAT
+        /*
+         * Win32s: Alt-Tab and Alt-Esc must reach DefWindowProc for
+         * task switching.  On Win95+/NT the system intercepts these
+         * before WndProc; on Win32s they arrive as WM_SYSKEYDOWN.
+         */
+        if (left_alt && (wParam == VK_TAB || wParam == VK_ESCAPE))
+            return -1;
+#endif
         if (left_alt && wParam == VK_F4 &&
             conf_get_bool(wgs->conf, CONF_alt_f4)) {
             return -1;
