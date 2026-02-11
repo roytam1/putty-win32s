@@ -495,7 +495,7 @@ void paneltitle(struct ctlpos *cp, int id, const char *text)
     r.left = GAPBETWEEN;
     r.top = cp->ypos;
     r.right = cp->width;
-    r.bottom = TITLEHEIGHT;
+    r.bottom = TITLEHEIGHT - 3;
     cp->ypos += r.bottom + GAPBETWEEN;
     doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_CENTER | WS_BORDER,
           0, text, id);
