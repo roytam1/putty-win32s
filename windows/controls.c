@@ -497,8 +497,8 @@ void paneltitle(struct ctlpos *cp, int id, const char *text)
     r.right = cp->width;
     r.bottom = TITLEHEIGHT;
     cp->ypos += r.bottom + GAPBETWEEN;
-    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_CENTER,
-          WS_EX_CLIENTEDGE, text, id);
+    doctl(cp, r, "STATIC", WS_CHILD | WS_VISIBLE | SS_CENTER | WS_BORDER,
+          0, text, id);
 }
 #else
 void paneltitle(struct ctlpos *cp, int id)
