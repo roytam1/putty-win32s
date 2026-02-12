@@ -98,9 +98,15 @@ static void winsftp_append(const char *text)
 
     len = GetWindowTextLength(g_output);
 
-    /* Trim the output buffer if it gets too large (EDIT limit ~30 KB) */
+    /* Trim the output buffer if it gets too large (EDIT limit ~30 KB).
+     * Snap the cut point to the start of the next line so we never
+     * leave a half-wiped line at the top of the backlog. */
     if (len > 28000) {
-        SendMessage(g_output, EM_SETSEL, 0, 14000);
+        int cut = 14000;
+        int line = (int)SendMessage(g_output, EM_LINEFROMCHAR, cut, 0);
+        int next = (int)SendMessage(g_output, EM_LINEINDEX, line + 1, 0);
+        if (next > cut) cut = next; /* advance to line boundary */
+        SendMessage(g_output, EM_SETSEL, 0, cut);
         SendMessage(g_output, EM_REPLACESEL, FALSE, (LPARAM)"");
         len = GetWindowTextLength(g_output);
     }
