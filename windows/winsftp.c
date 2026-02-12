@@ -324,10 +324,16 @@ void console_print_error_msg_fmt(const char *prefix, const char *fmt, ...)
 void modalfatalbox(const char *fmt, ...)
 {
     va_list ap;
+    char *msg;
     va_start(ap, fmt);
-    console_print_error_msg_fmt_v("FATAL ERROR", fmt, ap);
+    msg = dupvprintf(fmt, ap);
     va_end(ap);
-    cleanup_exit(1);
+    /* Don't exit — show in the output area and let psftp_main unwind
+     * cleanly so WinMain can restart the session. */
+    winsftp_append("Connection error: ");
+    winsftp_append(msg);
+    winsftp_append("\r\n");
+    sfree(msg);
 }
 
 void nonfatal(const char *fmt, ...)
@@ -438,8 +444,11 @@ const SeatDialogPromptDescriptions *console_prompt_descriptions(Seat *seat)
 
 void console_connection_fatal(Seat *seat, const char *msg)
 {
-    console_print_error_msg("FATAL ERROR", msg);
-    cleanup_exit(1);
+    /* Don't exit — let psftp_main unwind cleanly and WinMain restart
+     * the session, just like after a normal disconnection. */
+    winsftp_append("Connection error: ");
+    winsftp_append(msg);
+    winsftp_append("\r\n");
 }
 
 void console_nonfatal(Seat *seat, const char *msg)
