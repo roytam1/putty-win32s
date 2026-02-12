@@ -529,6 +529,13 @@ void store_host_key(Seat *seat, const char *hostname, int port,
         fprintf(wfp, "%s %s\n", expected->s, key);
         fclose(wfp);
 
+        /* Must close rfp before remove/rename: Windows won't delete
+         * or rename over an open file handle. */
+        if (rfp) {
+            fclose(rfp);
+            rfp = NULL;
+        }
+
         /* Atomic-ish replace */
         remove(filename);
         rename(tmpfilename, filename);
