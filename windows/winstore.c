@@ -45,7 +45,7 @@ char *make_dir_path(const char *path, mode_t mode)
         if (pos > 0) {
             prefix = dupprintf("%.*s", pos, path);
 
-            if (mkdir(prefix) < 0 && errno != EACCES) {
+            if (mkdir(prefix) < 0 && errno != EACCES && errno != EEXIST) {
                 char *ret = dupprintf("%s: mkdir: %s",
                                       prefix, strerror(errno));
                 sfree(prefix);
