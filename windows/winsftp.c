@@ -64,9 +64,10 @@ static WNDPROC g_input_orig_proc; /* for subclassing g_input */
  * Command-line input synchronisation
  * (set by WndProc when user presses Send/Enter)
  * ---------------------------------------------------------------- */
-static char  *g_cmd_line  = NULL;
-static bool   g_cmd_ready = false;
-static bool   g_running   = true;
+static char  *g_cmd_line      = NULL;
+static bool   g_cmd_ready     = false;
+static bool   g_running       = true;
+static bool   g_suppress_echo = false; /* true during credential prompts */
 
 /* ----------------------------------------------------------------
  * Progress state
@@ -255,6 +256,7 @@ SeatPromptResult filexfer_get_userpass_input(Seat *seat, prompts_t *p)
         /* Clear status */
         if (g_status) SetWindowText(g_status, "Enter credential");
 
+        g_suppress_echo = true;
         g_cmd_ready = false;
         g_cmd_line  = NULL;
 
@@ -275,6 +277,7 @@ SeatPromptResult filexfer_get_userpass_input(Seat *seat, prompts_t *p)
         }
 
         /* Restore normal (unmasked) input */
+        g_suppress_echo = false;
         if (g_input)
             SendMessage(g_input, EM_SETPASSWORDCHAR, 0, 0);
 
@@ -975,6 +978,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                 g_cmd_line = snewn(len + 2, char);
                 GetWindowText(g_input, g_cmd_line, len + 1);
                 SetWindowText(g_input, "");
+                if (!g_suppress_echo) {
+                    winsftp_append("> ");
+                    winsftp_append(g_cmd_line);
+                    winsftp_append("\r\n");
+                }
                 g_cmd_ready = true;
             } else {
                 /* Empty Enter: submit empty line (exits batch/interactive) */
