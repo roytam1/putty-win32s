@@ -15,7 +15,7 @@
 # Tool path: set TOOLPATH if windres is not on PATH.
 
 CC       = wcl386
-RC       = i686-w64-mingw32-windres
+RC       = rc
 TOOLPATH =
 RCPATH   = $(TOOLPATH)$(RC)
 
@@ -37,9 +37,9 @@ CFLAGS = -za99 -bt=nt -od -D_WINDOWS -D_WIN32 -DWIN32 &
 LDFLAGS = -s
 
 # windres output format: binary .res (bound post-link by wrc)
-RCFLAGS = -O res --define WIN32=1 --define _WIN32=1 --define WINVER=0x0400 &
-          --define HAVE_WINRESRC_H=1 &
-          --define NO_MANIFESTS=1 &
+RCFLAGS = -DWIN32=1 -D_WIN32=1 -DWINVER=0x0400 &
+          -DHAVE_WINRESRC_H=1 &
+          -DNO_MANIFESTS=1 &
           -I.. -I../windows
 
 # -----------------------------------------------------------------
@@ -455,25 +455,25 @@ be_list_psftp.obj: ../be_list.c
 # =================================================================
 
 pageant.res: pageant.rc
-	$(RCPATH) $(RCFLAGS) pageant.rc -o pageant.res
+	$(RCPATH) $(RCFLAGS) pageant.rc -fopageant.res
 
 putty.res: putty.rc
-	$(RCPATH) $(RCFLAGS) putty.rc -o putty.res
+	$(RCPATH) $(RCFLAGS) putty.rc -foputty.res
 
 puttytel.res: puttytel.rc
-	$(RCPATH) $(RCFLAGS) puttytel.rc -o puttytel.res
+	$(RCPATH) $(RCFLAGS) puttytel.rc -foputtytel.res
 
 plink.res: plink.rc
-	$(RCPATH) $(RCFLAGS) plink.rc -o plink.res
+	$(RCPATH) $(RCFLAGS) plink.rc -foplink.res
 
 pscp.res: pscp.rc
-	$(RCPATH) $(RCFLAGS) pscp.rc -o pscp.res
+	$(RCPATH) $(RCFLAGS) pscp.rc -fopscp.res
 
 psftp.res: psftp.rc
-	$(RCPATH) $(RCFLAGS) psftp.rc -o psftp.res
+	$(RCPATH) $(RCFLAGS) psftp.rc -fopsftp.res
 
 puttygen.res: puttygen.rc
-	$(RCPATH) $(RCFLAGS) puttygen.rc -o puttygen.res
+	$(RCPATH) $(RCFLAGS) puttygen.rc -foputtygen.res
 
 # =================================================================
 # pageant.exe — SSH agent (GUI)
