@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #define NEED_DECLARATION_OF_SELECT
 #include "putty.h"
@@ -32,6 +33,7 @@
 #include "storage.h"
 #include "security-api.h"
 #include "putty-rc.h"
+#include "version.h"
 
 /* ----------------------------------------------------------------
  * Forward declarations
@@ -50,6 +52,8 @@ static HWND g_output;   /* read-only multiline EDIT */
 static HWND g_input;    /* single-line command EDIT */
 static HWND g_status;   /* STATIC for progress/status text */
 static HWND g_send;     /* "Send" push button */
+
+static WNDPROC g_input_orig_proc; /* for subclassing g_input */
 
 #define IDC_OUTPUT  100
 #define IDC_INPUT   101
@@ -636,8 +640,6 @@ char *ssh_sftp_get_cmdline(const char *prompt, bool no_fds_ok)
     MSG msg;
     char *ret;
 
-    winsftp_append(prompt);
-
     /* Clear progress status */
     if (g_status) SetWindowText(g_status, "Ready");
 
@@ -677,6 +679,201 @@ char *ssh_sftp_get_cmdline(const char *prompt, bool no_fds_ok)
     }
 
     return ret; /* caller frees */
+}
+
+/* ================================================================
+ * Tab completion
+ * ================================================================ */
+
+/*
+ * Split a path token at the last separator into dir+prefix.
+ * dir will include the trailing backslash if present.
+ * Both strings must be freed by the caller.
+ */
+static void split_path(const char *token,
+                        char **dir_out, char **prefix_out)
+{
+    const char *p = token + strlen(token);
+    while (p > token && p[-1] != '\\' && p[-1] != '/')
+        p--;
+    if (p == token) {
+        *dir_out    = dupstr("");
+        *prefix_out = dupstr(token);
+    } else {
+        int dir_len = (int)(p - token);
+        *dir_out    = snewn(dir_len + 1, char);
+        memcpy(*dir_out, token, dir_len);
+        (*dir_out)[dir_len] = '\0';
+        *prefix_out = dupstr(p);
+    }
+}
+
+/*
+ * Tab completion: enumerate local filesystem entries matching the
+ * last token in the input field.  Absolute paths (C:\...) and
+ * relative paths (resolved against the current local directory set
+ * by the 'lcd' command) are both supported.
+ */
+static void tab_complete(void)
+{
+    char input_buf[1024];
+    int input_len, token_offset, i;
+    const char *token_start;
+    char *token, *dir_part, *prefix_part;
+    char search_pat[MAX_PATH + 4];
+    HANDLE hFind;
+    WIN32_FIND_DATA fd;
+    char **matches = NULL;
+    int n_matches = 0, max_matches = 0;
+    char common[MAX_PATH];
+    int common_len;
+
+    if (!g_input) return;
+
+    input_len = GetWindowText(g_input, input_buf, (int)sizeof(input_buf) - 1);
+    input_buf[input_len] = '\0';
+
+    /* The token to complete is everything after the last space */
+    {
+        char *sp = strrchr(input_buf, ' ');
+        token_start = sp ? sp + 1 : input_buf;
+    }
+    token_offset = (int)(token_start - input_buf);
+    token = dupstr(token_start);
+
+    split_path(token, &dir_part, &prefix_part);
+
+    /* FindFirstFile search pattern: dir\prefix* */
+    if ((int)(strlen(dir_part) + strlen(prefix_part)) + 2 > MAX_PATH)
+        goto cleanup;
+    sprintf(search_pat, "%s%s*", dir_part, prefix_part);
+
+    /* Enumerate matching entries */
+    hFind = FindFirstFile(search_pat, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            const char *name = fd.cFileName;
+            bool is_dir = !!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+            char *entry;
+            if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+                continue;
+            if (n_matches >= max_matches) {
+                max_matches = max_matches ? max_matches * 2 : 16;
+                matches = sresize(matches, max_matches, char *);
+            }
+            /* Completion stores the dir_part prefix so the token is
+             * reconstructed correctly for both relative and absolute paths. */
+            if (is_dir)
+                entry = dupcat(dir_part, name, "\\");
+            else
+                entry = dupcat(dir_part, name);
+            matches[n_matches++] = entry;
+        } while (FindNextFile(hFind, &fd));
+        FindClose(hFind);
+    }
+
+    if (n_matches == 0) {
+        MessageBeep((UINT)-1);
+        goto cleanup;
+    }
+
+    if (n_matches == 1) {
+        /* Single match: fill it in; append a space unless it's a dir */
+        const char *m = matches[0];
+        int mlen = (int)strlen(m);
+        bool add_space = (mlen == 0 || m[mlen - 1] != '\\');
+        char *new_text = snewn(token_offset + mlen + 2, char);
+        memcpy(new_text, input_buf, token_offset);
+        memcpy(new_text + token_offset, m, mlen);
+        if (add_space) {
+            new_text[token_offset + mlen]     = ' ';
+            new_text[token_offset + mlen + 1] = '\0';
+        } else {
+            new_text[token_offset + mlen] = '\0';
+        }
+        SetWindowText(g_input, new_text);
+        {
+            int newlen = (int)strlen(new_text);
+            SendMessage(g_input, EM_SETSEL, newlen, newlen);
+        }
+        sfree(new_text);
+        goto cleanup;
+    }
+
+    /* Multiple matches: show list, then extend to longest common prefix */
+    winsftp_append("Completions:\r\n");
+    for (i = 0; i < n_matches; i++) {
+        winsftp_append("  ");
+        winsftp_append(matches[i]);
+        winsftp_append("\r\n");
+    }
+
+    /* Compute longest common prefix of the name portions */
+    {
+        int dir_len = (int)strlen(dir_part);
+        const char *first = matches[0] + dir_len;
+        common_len = (int)strlen(first);
+        if (common_len >= MAX_PATH) common_len = MAX_PATH - 1;
+        strncpy(common, first, common_len);
+        common[common_len] = '\0';
+        for (i = 1; i < n_matches; i++) {
+            const char *name = matches[i] + dir_len;
+            int j;
+            for (j = 0; j < common_len && name[j]; j++) {
+                if (tolower((unsigned char)common[j]) !=
+                    tolower((unsigned char)name[j]))
+                    break;
+            }
+            common_len = j;
+        }
+        common[common_len] = '\0';
+    }
+
+    /* Extend the input field if the common prefix is longer than what
+     * was already typed */
+    if (common_len > (int)strlen(prefix_part)) {
+        char *completed = dupcat(dir_part, common);
+        int clen = (int)strlen(completed);
+        char *new_text = snewn(token_offset + clen + 1, char);
+        memcpy(new_text, input_buf, token_offset);
+        memcpy(new_text + token_offset, completed, clen);
+        new_text[token_offset + clen] = '\0';
+        SetWindowText(g_input, new_text);
+        {
+            int newlen = (int)strlen(new_text);
+            SendMessage(g_input, EM_SETSEL, newlen, newlen);
+        }
+        sfree(completed);
+        sfree(new_text);
+    }
+
+  cleanup:
+    for (i = 0; i < n_matches; i++)
+        sfree(matches[i]);
+    sfree(matches);
+    sfree(token);
+    sfree(dir_part);
+    sfree(prefix_part);
+}
+
+/*
+ * Subclass procedure for g_input: intercepts Tab for completion.
+ * WM_GETDLGCODE returns DLGC_WANTTAB so IsDialogMessage doesn't
+ * consume Tab before the window sees it.
+ */
+static LRESULT CALLBACK InputSubclassProc(HWND hwnd, UINT umsg,
+                                           WPARAM wParam, LPARAM lParam)
+{
+    if (umsg == WM_GETDLGCODE)
+        return CallWindowProc(g_input_orig_proc, hwnd, umsg, wParam, lParam)
+               | DLGC_WANTTAB;
+    if (umsg == WM_KEYDOWN && wParam == VK_TAB) {
+        tab_complete();
+        return 0;
+    }
+    if (umsg == WM_CHAR && wParam == '\t')
+        return 0; /* eat the translated Tab character */
+    return CallWindowProc(g_input_orig_proc, hwnd, umsg, wParam, lParam);
 }
 
 /* ================================================================
@@ -731,6 +928,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                                 ES_AUTOHSCROLL,
                                 0, 0, 0, 0,
                                 hwnd, (HMENU)IDC_INPUT, hinst, NULL);
+        /* Subclass input EDIT to intercept Tab for completion */
+        g_input_orig_proc = (WNDPROC)SetWindowLong(
+            g_input, GWL_WNDPROC, (LONG)InputSubclassProc);
         /* Send button — ID = IDOK so IsDialogMessage routes Enter here */
         g_send   = CreateWindow("BUTTON", "Send",
                                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
@@ -841,7 +1041,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev,
     /* Session loop: restart after each session ends */
     ret = 0;
     while (g_hwnd && g_running) {
-        winsftp_append("WinSFTP 0.83 type \"open host\" to connect\r\n\r\n");
+        winsftp_append("WinSFTP " TEXTVER " type \"open [user@]host [port]\" to connect\r\n\r\n");
 
         ret = psftp_main(NULL);
 
