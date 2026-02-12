@@ -842,10 +842,9 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev,
         }
     }
 
-    /* Cleanup: sockets, random seed, GDI objects, window class */
-    sk_cleanup();
-    random_save_seed();
-    DestroyIcon(wc.hIcon);
+    /* psftp_main already calls sk_cleanup() and random_save_seed().
+     * wc.hIcon is a shared resource (LoadIcon) — do NOT DestroyIcon it.
+     * Only the window class needs unregistering here. */
     if (!hPrev)
         UnregisterClass("WinSFTP", hInst);
 
