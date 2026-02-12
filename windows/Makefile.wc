@@ -417,9 +417,9 @@ OBJ_ROOTSHARED = &
 # Default target
 # =================================================================
 
-all: pageant.exe plink.exe pscp.exe psftp.exe putty.exe puttygen.exe puttytel.exe .SYMBOLIC
+all: pageant.exe plink.exe pscp.exe psftp.exe putty.exe puttygen.exe puttytel.exe winsftp.exe .SYMBOLIC
 
-win32s: putty.exe puttytel.exe puttygen.exe .SYMBOLIC
+win32s: putty.exe puttytel.exe puttygen.exe winsftp.exe .SYMBOLIC
 
 # =================================================================
 # be_list.c — per-target compilation with different defines
@@ -632,6 +632,64 @@ PSFTP_OBJS = &
 
 psftp.exe: $(PSFTP_OBJS) psftp.res
 	$(CC) -bt=nt -l=nt -fe=$@ $(LDFLAGS) $(PSFTP_OBJS)
+	wrc psftp.res $@
+
+# =================================================================
+# winsftp.exe — GUI SFTP client (winsftp.c GUI wrapper for psftp)
+# =================================================================
+
+# psftp.c compiled with WINSFTP_BUILD to add progress hooks and
+# redirect printf/fprintf to the GUI output area.
+psftp_winsftp.obj: ../psftp.c
+	$(CC) $(COMPAT) $(CFLAGS) $(XFLAGS) &
+	    -DWINSFTP_BUILD=1 &
+	    "-Dprintf=winsftp_printf" "-Dfprintf=winsftp_fprintf" &
+	    -fo=$@ -c ../psftp.c
+
+# windows/sftp.c compiled with WINSFTP_BUILD: keeps only file I/O
+# helpers (RFile/WFile/DirHandle/etc.); strips event loop and main.
+win_sftp_fileio.obj: sftp.c
+	$(CC) $(COMPAT) $(CFLAGS) $(XFLAGS) &
+	    -DWINSFTP_BUILD=1 &
+	    -fo=$@ -c sftp.c
+
+winsftp.obj: winsftp.c
+	$(CC) $(COMPAT) $(CFLAGS) $(XFLAGS) -fo=$@ -c winsftp.c
+
+WINSFTP_OBJS = &
+	be_list_psftp.obj &
+	psftp_winsftp.obj &
+	psftpcommon.obj &
+	win_sftp_fileio.obj &
+	winsftp.obj &
+	help.obj &
+	nohelp.obj &
+	no-lineedit.obj &
+	no-jump-list.obj &
+	no-ca-config.obj &
+	$(OBJ_ROOTSHARED) &
+	$(OBJ_SSHCLIENT) &
+	$(OBJ_PROXY) &
+	$(OBJ_CRYPTO) &
+	$(OBJ_CRYPTO_ROOT) &
+	$(OBJ_UTILS) &
+	$(OBJ_UTILS_SOCKETS) &
+	$(OBJ_UTILS_X11) &
+	$(OBJ_WINUTILS) &
+	$(OBJ_WINUTILS_GUIONLY) &
+	$(OBJ_WINNET) &
+	cliloop.obj &
+	handle-wait.obj &
+	select-cli.obj &
+	win_sharing.obj &
+	noise.obj &
+	win_agent_client.obj &
+	win_gss.obj &
+	ssh_sftp.obj &
+	sftpcommon.obj
+
+winsftp.exe: $(WINSFTP_OBJS) psftp.res
+	$(CC) -bt=nt -l=nt_win -fe=$@ $(LDFLAGS) $(WINSFTP_OBJS)
 	wrc psftp.res $@
 
 # =================================================================

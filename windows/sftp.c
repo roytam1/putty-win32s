@@ -2,7 +2,11 @@
  * sftp.c: the Windows-specific parts of PSFTP and PSCP.
  */
 
+#ifdef WIN32S_COMPAT
+#include <winsock.h>
+#else
 #include <winsock2.h> /* need to put this first, for winelib builds */
+#endif
 #include <assert.h>
 
 #define NEED_DECLARATION_OF_SELECT
@@ -12,6 +16,7 @@
 #include "ssh.h"
 #include "security-api.h"
 
+#ifndef WINSFTP_BUILD
 SeatPromptResult filexfer_get_userpass_input(Seat *seat, prompts_t *p)
 {
     /* The file transfer tools don't support Restart Session, so we
@@ -32,6 +37,7 @@ void platform_get_x11_auth(struct X11Display *display, Conf *conf)
     /* Do nothing, therefore no auth. */
 }
 const bool platform_uses_x11_unix_by_default = true;
+#endif /* !WINSFTP_BUILD */
 
 /* ----------------------------------------------------------------------
  * File access abstraction.
@@ -502,6 +508,7 @@ int do_eventsel_loop(HANDLE other_event)
     return ctx->toret;
 }
 
+#ifndef WINSFTP_BUILD
 /*
  * Wait for some network data and process it.
  *
@@ -521,6 +528,36 @@ int ssh_sftp_loop_iteration(void)
 
         if (skt == INVALID_SOCKET)
             return -1;                 /* doom */
+
+        /*
+         * Drain any pending toplevel callbacks before blocking in
+         * select().  With WinSock 1 (WIN32S_COMPAT / wsock32.dll),
+         * WSAEventSelect is not available, so the WS2 event loop in
+         * cli_main_loop() is never entered and run_toplevel_callbacks()
+         * is never called from there.  Callbacks queued by backend_init
+         * (e.g. ic_in_raw) or left over from processing previously
+         * received data (e.g. ic_process_queue, ic_out_pq, ic_out_raw)
+         * must therefore be pumped here.
+         *
+         * Crucially, if any callbacks are pending we run them all and
+         * return 0 immediately, giving the caller a chance to check for
+         * freshly-delivered application data (e.g. received_data in
+         * psftp) before we block again in select().  Without this early
+         * return the following scenario causes a hang:
+         *   1. select() returns with SSH_MSG_CHANNEL_DATA (FXP_VERSION)
+         *   2. ic_in_raw queued, one run_toplevel_callbacks() fires it;
+         *      ic_process_queue is now queued
+         *   3. we return 0 — caller loops back and calls us again
+         *   4. drain loop: ic_process_queue runs, fills received_data
+         *   5. but then we fall straight into select(), blocking forever
+         *      while received_data already has the FXP_VERSION the
+         *      caller needs
+         */
+        if (toplevel_callback_pending()) {
+            while (toplevel_callback_pending())
+                run_toplevel_callbacks();
+            return 0;
+        }
 
         if (socket_writable(skt))
             select_result((WPARAM) skt, (LPARAM) FD_WRITE);
@@ -558,6 +595,7 @@ int ssh_sftp_loop_iteration(void)
         } while (ret == 0);
 
         select_result((WPARAM) skt, (LPARAM) FD_READ);
+        run_toplevel_callbacks();
 
         return 0;
     } else {
@@ -633,7 +671,9 @@ char *ssh_sftp_get_cmdline(const char *prompt, bool no_fds_ok)
 
     return ctx->line;
 }
+#endif /* !WINSFTP_BUILD — ssh_sftp_loop_iteration + ssh_sftp_get_cmdline */
 
+#ifndef WINSFTP_BUILD
 void platform_psftp_pre_conn_setup(LogPolicy *lp)
 {
     if (restricted_acl()) {
@@ -656,3 +696,4 @@ int main(int argc, char *argv[])
 
     return ret;
 }
+#endif /* !WINSFTP_BUILD */

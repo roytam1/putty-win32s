@@ -5,7 +5,11 @@
 #ifndef PUTTY_WINDOWS_PLATFORM_H
 #define PUTTY_WINDOWS_PLATFORM_H
 
+#ifdef WIN32S_COMPAT
+#include <winsock.h>
+#else
 #include <winsock2.h>
+#endif
 #include <windows.h>
 #include <stdio.h>                     /* for FILENAME_MAX */
 
@@ -353,6 +357,17 @@ Socket *sk_newlistener_unix(const char *socketpath, Plug *plug);
  * that module must be exported from it as function pointers. So
  * here they are.
  */
+/*
+ * WSAEVENT and LPWSANETWORKEVENTS are WinSock 2 types not present in
+ * winsock.h.  Under WIN32S_COMPAT we define stubs so the
+ * DECL_WINDOWS_FUNCTION macros below still compile; the function
+ * pointers will simply remain NULL because sk_init() never loads them.
+ */
+#ifdef WIN32S_COMPAT
+typedef HANDLE WSAEVENT;
+typedef void * LPWSANETWORKEVENTS;
+#endif
+
 DECL_WINDOWS_FUNCTION(extern, int, WSAAsyncSelect,
                       (SOCKET, HWND, u_int, LONG));
 DECL_WINDOWS_FUNCTION(extern, int, WSAEventSelect,

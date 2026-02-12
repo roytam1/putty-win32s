@@ -5,7 +5,11 @@
  * unfix.org.
  */
 
+#ifdef WIN32S_COMPAT
+#include <winsock.h>
+#else
 #include <winsock2.h> /* need to put this first, for winelib builds */
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +22,16 @@
 #include "tree234.h"
 #include "ssh.h"
 
+#ifndef WIN32S_COMPAT
 #include <ws2tcpip.h>
+#else
+/* WinSock 1 does not define SD_* names; define them by their numeric values */
+#ifndef SD_SEND
+#define SD_RECEIVE 0
+#define SD_SEND    1
+#define SD_BOTH    2
+#endif
+#endif
 
 #if HAVE_AFUNIX_H
 #include <afunix.h>
@@ -212,10 +225,12 @@ DECL_WINDOWS_FUNCTION(static, int, getpeername,
 DECL_WINDOWS_FUNCTION(static, int, getsockname,
                       (SOCKET, struct sockaddr FAR *, int FAR *));
 DECL_WINDOWS_FUNCTION(static, int, recv, (SOCKET, char FAR *, int, int));
+#ifndef WIN32S_COMPAT
 DECL_WINDOWS_FUNCTION(static, int, WSAIoctl,
                       (SOCKET, DWORD, LPVOID, DWORD, LPVOID, DWORD,
                        LPDWORD, LPWSAOVERLAPPED,
                        LPWSAOVERLAPPED_COMPLETION_ROUTINE));
+#endif
 #ifndef NO_IPV6
 DECL_WINDOWS_FUNCTION(static, int, getaddrinfo,
                       (const char *nodename, const char *servname,
@@ -259,6 +274,9 @@ DEF_WINDOWS_FUNCTION(WSAEventSelect);
 DEF_WINDOWS_FUNCTION(WSAGetLastError);
 DEF_WINDOWS_FUNCTION(WSAEnumNetworkEvents);
 DEF_WINDOWS_FUNCTION(select);
+#ifndef WIN32S_COMPAT
+DEF_WINDOWS_FUNCTION(WSAIoctl);
+#endif
 
 void sk_init(void)
 {
@@ -304,14 +322,22 @@ void sk_init(void)
 #endif
 
     GET_WINDOWS_FUNCTION(winsock_module, WSAAsyncSelect);
+    /* WSAEventSelect and WSAEnumNetworkEvents are WinSock 2 only; their
+     * actual symbols aren't in winsock.h so GET_WINDOWS_FUNCTION's
+     * type-check would fail.  Skip under WIN32S_COMPAT: the pointers
+     * stay NULL, and runtime callers already null-check them. */
+#ifndef WIN32S_COMPAT
     GET_WINDOWS_FUNCTION(winsock_module, WSAEventSelect);
+#endif
     /* We don't type-check select because at least some MinGW versions
      * of the Windows API headers seem to disagree with the
      * documentation on whether the 'struct timeval *' pointer is
      * const or not. */
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(winsock_module, select);
     GET_WINDOWS_FUNCTION(winsock_module, WSAGetLastError);
+#ifndef WIN32S_COMPAT
     GET_WINDOWS_FUNCTION(winsock_module, WSAEnumNetworkEvents);
+#endif
     GET_WINDOWS_FUNCTION(winsock_module, WSAStartup);
     GET_WINDOWS_FUNCTION(winsock_module, WSACleanup);
     GET_WINDOWS_FUNCTION(winsock_module, closesocket);
@@ -344,14 +370,21 @@ void sk_init(void)
     GET_WINDOWS_FUNCTION(winsock_module, getpeername);
     GET_WINDOWS_FUNCTION(winsock_module, getsockname);
     GET_WINDOWS_FUNCTION(winsock_module, recv);
+#ifndef WIN32S_COMPAT
     GET_WINDOWS_FUNCTION(winsock_module, WSAIoctl);
+#endif
 
     /* Try to get the best WinSock version we can get */
+#ifdef WIN32S_COMPAT
+    if (!sk_startup(1,1))
+        modalfatalbox("Unable to initialise WinSock");
+#else
     if (!sk_startup(2,2) &&
         !sk_startup(2,0) &&
         !sk_startup(1,1)) {
         modalfatalbox("Unable to initialise WinSock");
     }
+#endif
 
     sktree = newtree234(cmpfortree);
 }
@@ -687,13 +720,16 @@ bool sk_hostname_is_local(const char *name)
            !strncmp(name, "127.", 4);
 }
 
+#ifndef WIN32S_COMPAT
 static INTERFACE_INFO local_interfaces[16];
 static int n_local_interfaces;       /* 0=not yet, -1=failed, >0=number */
+#endif
 
 static bool ipv4_is_local_addr(struct in_addr addr)
 {
     if (ipv4_is_loopback(addr))
         return true;                   /* loopback addresses are local */
+#ifndef WIN32S_COMPAT
     if (!n_local_interfaces) {
         SOCKET s = p_socket(AF_INET, SOCK_DGRAM, 0);
         DWORD retbytes;
@@ -717,6 +753,7 @@ static bool ipv4_is_local_addr(struct in_addr addr)
                 return true;           /* this address is local */
         }
     }
+#endif
     return false;                      /* this address is not local */
 }
 
@@ -1205,8 +1242,10 @@ static Socket *sk_newlistener_internal(
 #endif
     {
         BOOL on = true;
+#ifndef WIN32S_COMPAT
         p_setsockopt(sk, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
                      (const char *)&on, sizeof(on));
+#endif
     }
 
     switch (address_family) {

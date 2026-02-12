@@ -51,6 +51,7 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
 
         if ((unsigned)(n - WAIT_OBJECT_0) < (unsigned)hwl->nhandles) {
             handle_wait_activate(hwl, n - WAIT_OBJECT_0);
+#ifndef WIN32S_COMPAT
         } else if (winselcli_event != INVALID_HANDLE_VALUE &&
                    n == WAIT_OBJECT_0 + winselcli_index) {
             WSANETWORKEVENTS things;
@@ -107,6 +108,7 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
                         }
                 }
             }
+#endif /* !WIN32S_COMPAT */
         } else if (n >= WAIT_OBJECT_0 + extra_base &&
                    n < WAIT_OBJECT_0 + extra_base + n_extra_handles) {
             extra_handle_index = n - (WAIT_OBJECT_0 + extra_base);

@@ -14,6 +14,12 @@
 #include "ssh.h"
 #include "ssh/sftp.h"
 
+#ifdef WINSFTP_BUILD
+/* Progress callbacks implemented in windows/winsftp.c */
+void sftp_progress_init(const char *fname, uint64_t total);
+void sftp_progress_update(uint64_t done);
+#endif
+
 /*
  * Since SFTP is a request-response oriented protocol, it requires
  * no buffer management: when we send data, we stop and wait for an
@@ -32,7 +38,11 @@ static void do_sftp_cleanup(void);
 static char *pwd, *homedir;
 static LogContext *psftp_logctx = NULL;
 static Backend *backend;
+#ifdef WINSFTP_BUILD
+Conf *conf;
+#else
 static Conf *conf;
+#endif
 static bool sent_eof = false;
 
 /* ------------------------------------------------------------
@@ -467,10 +477,12 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
             printf("remote:%s => local:%s\n", san, sano);
     }
 
-    /*
-     * FIXME: we can use FXP_FSTAT here to get the file size, and
-     * thus put up a progress bar.
-     */
+#ifdef WINSFTP_BUILD
+    sftp_progress_init(fname,
+        (attrs.flags & SSH_FILEXFER_ATTR_SIZE) ? attrs.size : 0);
+    {
+        uint64_t bytes_done = offset;
+#endif
     toret = true;
     xfer = xfer_download_init(fh, offset);
     while (!xfer_done(xfer)) {
@@ -510,9 +522,16 @@ bool sftp_get_file(char *fname, char *outfname, bool recurse, bool restart)
                 xfer_set_error(xfer);
             }
 
+#ifdef WINSFTP_BUILD
+            bytes_done += len;
+            sftp_progress_update(bytes_done);
+#endif
             sfree(vbuf);
         }
     }
+#ifdef WINSFTP_BUILD
+    } /* close bytes_done scope */
+#endif
 
     xfer_cleanup(xfer);
 
@@ -658,7 +677,12 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
         return true;
     }
 
+#ifdef WINSFTP_BUILD
+    uint64_t local_file_size = 0;
+    file = open_existing_file(fname, &local_file_size, NULL, NULL, &permissions);
+#else
     file = open_existing_file(fname, NULL, NULL, NULL, &permissions);
+#endif
     if (!file) {
         printf("local: unable to open %s\n", fname);
         return false;
@@ -710,10 +734,11 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
 
     printf("local:%s => remote:%s\n", fname, outfname);
 
-    /*
-     * FIXME: we can use FXP_FSTAT here to get the file size, and
-     * thus put up a progress bar.
-     */
+#ifdef WINSFTP_BUILD
+    sftp_progress_init(fname, local_file_size);
+    {
+        uint64_t bytes_sent = offset;
+#endif
     xfer = xfer_upload_init(fh, offset);
     eof = false;
     while ((!err && !eof) || !xfer_done(xfer)) {
@@ -729,6 +754,10 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
                 eof = true;
             } else {
                 xfer_upload_data(xfer, buffer, len);
+#ifdef WINSFTP_BUILD
+                bytes_sent += len;
+                sftp_progress_update(bytes_sent);
+#endif
             }
         }
 
@@ -757,6 +786,9 @@ bool sftp_put_file(char *fname, char *outfname, bool recurse, bool restart)
     }
 
     xfer_cleanup(xfer);
+#ifdef WINSFTP_BUILD
+    } /* close bytes_sent block */
+#endif
 
   cleanup:
     req = fxp_close_send(fh);
@@ -2810,6 +2842,14 @@ int psftp_main(CmdlineArgList *arglist)
     /* Load Default Settings before doing anything else. */
     conf = conf_new();
     do_defaults(NULL, conf);
+#ifdef WINSFTP_BUILD
+    /*
+     * winsftp.exe: always start fresh — no command-line parsing and no
+     * Default Settings auto-connect.  sent_eof must be cleared so that
+     * psftp_eof() works correctly for the new session.
+     */
+    sent_eof = false;
+#else
 
     size_t arglistpos = 0;
     while (arglist->args[arglistpos]) {
@@ -2863,6 +2903,7 @@ int psftp_main(CmdlineArgList *arglist)
             cmdline_error("unknown option \"%s\"", argstr);
         }
     }
+#endif /* WINSFTP_BUILD */
     backend = NULL;
 
     stdio_sink_init(&stderr_ss, stderr);
@@ -2874,6 +2915,7 @@ int psftp_main(CmdlineArgList *arglist)
 
     string_scc = stripctrl_new(NULL, false, L'\0');
 
+#ifndef WINSFTP_BUILD
     /*
      * If the loaded session provides a hostname, and a hostname has not
      * otherwise been specified, pop it in `userhost' so that
@@ -2882,6 +2924,7 @@ int psftp_main(CmdlineArgList *arglist)
     if (!userhost && conf_get_str(conf, CONF_host)[0] != '\0') {
         userhost = dupstr(conf_get_str(conf, CONF_host));
     }
+#endif
 
     /*
      * If a user@host string has already been provided, connect to
@@ -2896,11 +2939,15 @@ int psftp_main(CmdlineArgList *arglist)
         if (do_sftp_init())
             return 1;
     } else {
+#ifndef WINSFTP_BUILD
         printf("psftp: no hostname specified; use \"open host.name\""
                " to connect\n");
+#endif
     }
 
+#ifndef WINSFTP_BUILD
     cmdline_arg_list_free(arglist);
+#endif
 
     toret = do_sftp(mode, modeflags, batchfile);
 
