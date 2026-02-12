@@ -434,10 +434,12 @@ int main(int argc, char **argv)
     }
 
     sk_init();
+#ifndef WIN32S_COMPAT
     if (p_WSAEventSelect == NULL) {
         fprintf(stderr, "Plink requires WinSock 2\n");
         return 1;
     }
+#endif
 
     /*
      * Plink doesn't provide any way to add forwardings after the

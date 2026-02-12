@@ -1,3 +1,6 @@
+#ifdef WIN32S_COMPAT
+#define NEED_DECLARATION_OF_SELECT
+#endif
 #include "putty.h"
 
 void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
@@ -44,6 +47,13 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
         assert(total_handles < MAXIMUM_WAIT_OBJECTS);
         for (size_t i = 0; i < n_extra_handles; i++)
             hwl->handles[extra_base + i] = extra_handles[i];
+
+#ifdef WIN32S_COMPAT
+        /* Under WinSock 1, sockets are not monitored by WFMO.
+         * Cap the wait so we can poll sockets at least every 50ms. */
+        if (ticks > 50)
+            ticks = 50;
+#endif
 
         n = WaitForMultipleObjects(total_handles, hwl->handles, false, ticks);
 
@@ -113,6 +123,69 @@ void cli_main_loop(cliloop_pre_t pre, cliloop_post_t post, void *ctx)
                    n < WAIT_OBJECT_0 + extra_base + n_extra_handles) {
             extra_handle_index = n - (WAIT_OBJECT_0 + extra_base);
         }
+
+#ifdef WIN32S_COMPAT
+        /* Under WinSock 1, poll all sockets using select() with
+         * zero timeout.  This handles socket events (connect,
+         * read, write, OOB) that WFMO cannot see without WS2.
+         *
+         * We avoid FD_ISSET() because it calls __WSAFDIsSet which
+         * is not linked (all WinSock calls go through p_* pointers).
+         * Instead, scan fd_set.fd_array manually. */
+        {
+            fd_set rfds, wfds, efds;
+            struct timeval tv = {0, 0};
+            int skt_ready;
+            SOCKET socket;
+            int socketstate;
+            int i;
+            u_int j;
+
+            FD_ZERO(&rfds); FD_ZERO(&wfds); FD_ZERO(&efds);
+            i = 0;
+            for (socket = first_socket(&socketstate);
+                 socket != INVALID_SOCKET;
+                 socket = next_socket(&socketstate)) {
+                FD_SET(socket, &rfds);
+                FD_SET(socket, &wfds);
+                FD_SET(socket, &efds);
+                i++;
+            }
+
+            if (i > 0) {
+                skt_ready = p_select(0, &rfds, &wfds, &efds, &tv);
+                if (skt_ready > 0) {
+                    /* Collect socket list first; select_result() may
+                     * modify the socket tree during enumeration. */
+                    sgrowarray(sklist, sksize, i);
+                    skcount = 0;
+                    for (socket = first_socket(&socketstate);
+                         socket != INVALID_SOCKET;
+                         socket = next_socket(&socketstate))
+                        sklist[skcount++] = socket;
+
+                    for (i = 0; i < skcount; i++) {
+                        WPARAM wp = (WPARAM) sklist[i];
+                        bool in_wfds = false, in_efds = false, in_rfds = false;
+                        for (j = 0; j < wfds.fd_count; j++)
+                            if (wfds.fd_array[j] == sklist[i]) { in_wfds = true; break; }
+                        for (j = 0; j < efds.fd_count; j++)
+                            if (efds.fd_array[j] == sklist[i]) { in_efds = true; break; }
+                        for (j = 0; j < rfds.fd_count; j++)
+                            if (rfds.fd_array[j] == sklist[i]) { in_rfds = true; break; }
+                        /* FD_WRITE first: flushes output / marks writable
+                         * (also handles connect completion on WS1). */
+                        if (in_wfds)
+                            select_result(wp, (LPARAM) WSAMAKESELECTREPLY(FD_WRITE, 0));
+                        if (in_efds)
+                            select_result(wp, (LPARAM) WSAMAKESELECTREPLY(FD_OOB, 0));
+                        if (in_rfds)
+                            select_result(wp, (LPARAM) WSAMAKESELECTREPLY(FD_READ, 0));
+                    }
+                }
+            }
+        }
+#endif /* WIN32S_COMPAT */
 
         run_toplevel_callbacks();
 
