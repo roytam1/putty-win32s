@@ -134,8 +134,10 @@ void noise_ultralight(NoiseSourceId id, unsigned long data)
 
 uint64_t prng_reseed_time_ms(void)
 {
+    SYSTEMTIME nowSysTime;
     FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
+    GetSystemTime(&nowSysTime);
+    SystemTimeToFileTime(&nowSysTime, &ft);
     uint64_t value = ft.dwHighDateTime;
     value = (value << 32) + ft.dwLowDateTime;
     return value / 10000;              /* 1 millisecond / 100ns */
