@@ -221,6 +221,106 @@ static HICON trust_icon = INVALID_HANDLE_VALUE;
 const bool share_can_be_downstream = true;
 const bool share_can_be_upstream = true;
 
+/* ScrollInfo wrappers */
+
+#ifdef WIN32S_COMPAT
+// Win32s scroll range is mimited to 32767
+#define MAX_SCROLL 32500
+#define MAX_MULT (32768-MAX_SCROLL)
+#else
+// Windows NT: scrollrange is limited to 65535
+#define MAX_SCROLL 65400
+#define MAX_MULT (65536-MAX_SCROLL)
+#endif
+
+// generate DWORD of MMmmbbbb (for example Win7(NT 6.1.7601) = 06011db1)
+#define MKVBN(M, m, b) ( (DWORD)( (BYTE)(M)<<24 | (BYTE)(m)<<16 | (WORD)(b) ) )
+
+BOOL MVI_isBuildGreater(DWORD dwTarget)
+{
+	DWORD MVI_VBN = MKVBN(osMajorVersion, osMinorVersion, osBuild);
+	return MVI_VBN >= dwTarget;
+}
+
+typedef int (WINAPI *SSCRINF)(HWND, int, LPSCROLLINFO, BOOL);
+int WINAPI MySetScrollInfo_fallback(HWND hwnd, int nBar, LPSCROLLINFO lpsi, BOOL redraw)
+{
+	// Smart Fallback...
+	// We must use SetScrollRange but it is mimited to 65535.
+	// So we can avoid oveflow by dividing range and position values
+	// In GreenPad we can assume that only nMax can go beyond range.
+	int MULT=1;
+	int nMax = lpsi->nMax;
+	// If we go beyond 65400 then we use a divider
+	if (nMax > MAX_SCROLL)
+	{   // 65501 - 65535 = 35 values MULT from 2-136
+		// Like this the new range is around 8912896 instead of 65535
+		MULT = min( (nMax / MAX_SCROLL) + 1,  MAX_MULT );
+		// We store the divider in the last 135 values
+		// of the max scroll range.
+		nMax = MAX_SCROLL + MULT - 1 ; // 65401 => MULT = 2
+	}
+
+	if (lpsi->fMask|SIF_RANGE)
+		SetScrollRange( hwnd, nBar, lpsi->nMin, nMax, FALSE );
+
+	return SetScrollPos( hwnd, nBar, lpsi->nPos/MULT, redraw );
+}
+int WINAPI MySetScrollInfo_init(HWND hwnd, int nBar, LPSCROLLINFO lpsi, BOOL redraw);
+static SSCRINF MySetScrollInfo = MySetScrollInfo_init;
+
+int WINAPI MySetScrollInfo_init(HWND hwnd, int nBar, LPSCROLLINFO lpsi, BOOL redraw)
+{
+	if( MySetScrollInfo == MySetScrollInfo_init ) {
+		MySetScrollInfo = (SSCRINF)GetProcAddress(GetModuleHandleA("USER32.DLL"), "SetScrollInfo");
+
+		// Should be supported since Windows NT 3.51...
+		if( !(MySetScrollInfo && ((!(osPlatformId == VER_PLATFORM_WIN32_NT) && osBuild>=275) || (osPlatformId == VER_PLATFORM_WIN32_NT && MVI_isBuildGreater(MKVBN(3,51,944))))) ) {
+			MySetScrollInfo = MySetScrollInfo_fallback;
+		}
+	}
+
+	return MySetScrollInfo( hwnd, nBar, lpsi, redraw );
+}
+
+typedef int (WINAPI *GSCRINF)(HWND, int, LPSCROLLINFO);
+int WINAPI MyGetScrollInfo_fallback(HWND hwnd, int nBar, LPSCROLLINFO lpsi)
+{
+	// Smart Fallback...
+	if( lpsi->fMask|SIF_RANGE )
+		GetScrollRange( hwnd, nBar, &lpsi->nMin, &lpsi->nMax);
+
+	lpsi->nPos = GetScrollPos( hwnd, nBar );
+	// Scroll range indicates a multiplier was used...
+	if( lpsi->nMax > MAX_SCROLL )
+	{ // Apply multipler
+		int MULT = lpsi->nMax - MAX_SCROLL + 1; // 65401 => MULT = 2
+		lpsi->nMax      *= MULT;
+		lpsi->nPos      *= MULT;
+		lpsi->nTrackPos *= MULT; // This has to be set by the user.
+	}
+	return 1; // sucess!
+}
+
+int WINAPI MyGetScrollInfo_init(HWND hwnd, int nBar, LPSCROLLINFO lpsi);
+static GSCRINF MyGetScrollInfo = MyGetScrollInfo_init;
+
+int WINAPI MyGetScrollInfo_init(HWND hwnd, int nBar, LPSCROLLINFO lpsi)
+{
+	if( MyGetScrollInfo == MyGetScrollInfo_init ) {
+		MyGetScrollInfo = (GSCRINF)GetProcAddress(GetModuleHandleA("USER32.DLL"), "GetScrollInfo");
+
+		// Should be supported since Windows NT 3.51...
+		if( !(MyGetScrollInfo && ((!(osPlatformId == VER_PLATFORM_WIN32_NT) && osBuild>=275) || (osPlatformId == VER_PLATFORM_WIN32_NT && MVI_isBuildGreater(MKVBN(3,51,944))))) ) {
+			MyGetScrollInfo = MyGetScrollInfo_fallback;
+		}
+	}
+
+	return MyGetScrollInfo( hwnd, nBar, lpsi );
+}
+
+/* End of ScrollInfo wrappers */
+
 static bool is_utf8(WinGuiSeat *wgs)
 {
     return wgs->ucsdata.line_codepage == CP_UTF8;
@@ -749,7 +849,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         si.nMax = wgs->term->rows - 1;
         si.nPage = wgs->term->rows;
         si.nPos = 0;
-        SetScrollInfo(wgs->term_hwnd, SB_VERT, &si, false);
+        MySetScrollInfo(wgs->term_hwnd, SB_VERT, &si, false);
     }
 
     /*
@@ -3271,8 +3371,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 
             si.cbSize = sizeof(si);
             si.fMask = SIF_TRACKPOS;
-            if (GetScrollInfo(hwnd, SB_VERT, &si) == 0)
-                si.nTrackPos = HIWORD(wParam);
+            si.nTrackPos = HIWORD(wParam);
+            MyGetScrollInfo(hwnd, SB_VERT, &si);
             term_scroll(wgs->term, 1, si.nTrackPos);
             break;
           }
@@ -5030,7 +5130,7 @@ static void wintw_set_scrollbar(TermWin *tw, int total, int start, int page)
     si.nPage = page;
     si.nPos = start;
     if (wgs->term_hwnd)
-        SetScrollInfo(wgs->term_hwnd, SB_VERT, &si, true);
+        MySetScrollInfo(wgs->term_hwnd, SB_VERT, &si, true);
 }
 
 static bool wintw_setup_draw_ctx(TermWin *tw)
