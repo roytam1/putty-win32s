@@ -690,7 +690,7 @@ HWND event_log_window(void);
 /*
  * Exports from utils.
  */
-extern DWORD osMajorVersion, osMinorVersion, osPlatformId;
+extern DWORD osMajorVersion, osMinorVersion, osBuild, osPlatformId;
 void init_winver(void);
 void dll_hijacking_protection(void);
 const char *get_system_dir(void);

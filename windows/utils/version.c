@@ -1,6 +1,6 @@
 #include "putty.h"
 
-DWORD osMajorVersion, osMinorVersion, osPlatformId;
+DWORD osMajorVersion, osMinorVersion, osBuild, osPlatformId;
 
 void init_winver(void)
 {
@@ -27,6 +27,7 @@ void init_winver(void)
     if (p_GetVersionExA && p_GetVersionExA(&osVersion)) {
         osMajorVersion = osVersion.dwMajorVersion;
         osMinorVersion = osVersion.dwMinorVersion;
+        osBuild = osVersion.dwBuildNumber;
         osPlatformId = osVersion.dwPlatformId;
     } else {
         /*
@@ -39,7 +40,7 @@ void init_winver(void)
          * Normally we should be checking against the presence of a
          * specific function if possible in any case.
          */
-        osMajorVersion = osMinorVersion = UINT_MAX; /* a very high number */
+        osMajorVersion = osMinorVersion = osBuild = UINT_MAX; /* a very high number */
         osPlatformId = VER_PLATFORM_WIN32_NT; /* not Win32s or Win95-like */
     }
 }
