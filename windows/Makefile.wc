@@ -35,6 +35,7 @@ CFLAGS = -za99 -bt=nt -l=win95 -od -D_WINDOWS -D_WIN32 -DWIN32 &
          -I../utils -I../keygen -I../proxy -I../windows
 
 LDFLAGS = -s -l=win95
+CLI_LDFLAGS = -s -l=win95 -"runtime con=3.10"
 
 # windres output format: binary .res (bound post-link by wrc)
 RCFLAGS = -DWIN32=1 -D_WIN32=1 -DWINVER=0x0400 &
@@ -551,7 +552,7 @@ PLINK_OBJS = &
 	win_gss.obj
 
 plink.exe: $(PLINK_OBJS) plink.res
-	$(CC) -bt=nt -l=nt -fe=$@ $(LDFLAGS) $(PLINK_OBJS)
+	$(CC) -bt=nt -l=nt -fe=$@ $(CLI_LDFLAGS) $(PLINK_OBJS)
 	wrc plink.res $@
 
 # =================================================================
@@ -591,7 +592,7 @@ PSCP_OBJS = &
 	sftpcommon.obj
 
 pscp.exe: $(PSCP_OBJS) pscp.res
-	$(CC) -bt=nt -l=nt -fe=$@ $(LDFLAGS) $(PSCP_OBJS)
+	$(CC) -bt=nt -l=nt -fe=$@ $(CLI_LDFLAGS) $(PSCP_OBJS)
 	wrc pscp.res $@
 
 # =================================================================
@@ -631,7 +632,7 @@ PSFTP_OBJS = &
 	sftpcommon.obj
 
 psftp.exe: $(PSFTP_OBJS) psftp.res
-	$(CC) -bt=nt -l=nt -fe=$@ $(LDFLAGS) $(PSFTP_OBJS)
+	$(CC) -bt=nt -l=nt -fe=$@ $(CLI_LDFLAGS) $(PSFTP_OBJS)
 	wrc psftp.res $@
 
 # =================================================================
