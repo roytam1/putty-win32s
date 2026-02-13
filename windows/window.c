@@ -1389,9 +1389,29 @@ static void general_textout(
             exact_textout(hdc, xp, y, lprc, lpString+i, j-i,
                           wgs->font_varpitch ? NULL : lpDx+i, opaque);
         } else {
-            ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
-                        lprc, lpString+i, j-i,
-                        wgs->font_varpitch ? NULL : lpDx+i);
+            if(osPlatformId != VER_PLATFORM_WIN32_NT) {
+                #define countof(x) (sizeof(x) / sizeof(x[0]))
+                DWORD dwNum, x;
+                char psTXT[1024];
+                char *psText = psTXT;
+                int ansi_lpDx[1024];
+                dwNum = WideCharToMultiByte(CP_ACP,0, lpString+i, j-i, psText,countof(psTXT), NULL,NULL);
+                psTXT[dwNum] = 0;
+                if(!wgs->font_varpitch) {
+                    for(x=0;x < dwNum; x++) {
+                        ansi_lpDx[x] = lpDx[i+(x/2)] / 2;
+                    }
+                }
+
+                ExtTextOutA(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
+                            lprc, psTXT, dwNum,
+                            wgs->font_varpitch ? NULL : ansi_lpDx);
+                #undef countof
+            } else {
+                ExtTextOutW(hdc, xp, y, ETO_CLIPPED | (opaque ? ETO_OPAQUE : 0),
+                            lprc, lpString+i, j-i,
+                            wgs->font_varpitch ? NULL : lpDx+i);
+            }
         }
 
         i = j;
