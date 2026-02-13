@@ -56,6 +56,31 @@ static HWND g_send;     /* "Send" push button */
 static WNDPROC g_input_orig_proc;  /* for subclassing g_input */
 static WNDPROC g_output_orig_proc; /* for subclassing g_output */
 
+/* ----------------------------------------------------------------
+ * Command history (Up/Down arrow recall)
+ * ---------------------------------------------------------------- */
+#define HISTORY_MAX 100
+static char *g_history[HISTORY_MAX];
+static int   g_history_count = 0;
+static int   g_history_pos   = -1;  /* -1 = not browsing */
+static char *g_history_saved = NULL; /* input line saved when browsing starts */
+
+static void history_add(const char *cmd)
+{
+    if (!cmd || !*cmd) return;
+    if (g_history_count == HISTORY_MAX) {
+        sfree(g_history[0]);
+        memmove(g_history, g_history + 1,
+                (HISTORY_MAX - 1) * sizeof(g_history[0]));
+        g_history_count--;
+    }
+    g_history[g_history_count++] = dupstr(cmd);
+    /* Reset browsing state */
+    g_history_pos = -1;
+    sfree(g_history_saved);
+    g_history_saved = NULL;
+}
+
 #define IDC_OUTPUT  100
 #define IDC_INPUT   101
 #define IDC_STATUS  102
@@ -909,6 +934,49 @@ static LRESULT CALLBACK InputSubclassProc(HWND hwnd, UINT umsg,
             return 0;
         }
     }
+    if (umsg == WM_KEYDOWN && wParam == VK_UP) {
+        if (g_history_count == 0) return 0;
+        if (g_history_pos == -1) {
+            /* Save whatever the user was typing */
+            int len = GetWindowTextLength(hwnd);
+            sfree(g_history_saved);
+            g_history_saved = snewn(len + 1, char);
+            GetWindowText(hwnd, g_history_saved, len + 1);
+            g_history_pos = g_history_count - 1;
+        } else if (g_history_pos > 0) {
+            g_history_pos--;
+        } else {
+            return 0; /* already at oldest entry */
+        }
+        SetWindowText(hwnd, g_history[g_history_pos]);
+        {
+            int len = (int)strlen(g_history[g_history_pos]);
+            SendMessage(hwnd, EM_SETSEL, len, len);
+        }
+        return 0;
+    }
+    if (umsg == WM_KEYDOWN && wParam == VK_DOWN) {
+        if (g_history_pos == -1) return 0;
+        if (g_history_pos < g_history_count - 1) {
+            g_history_pos++;
+            SetWindowText(hwnd, g_history[g_history_pos]);
+            {
+                int len = (int)strlen(g_history[g_history_pos]);
+                SendMessage(hwnd, EM_SETSEL, len, len);
+            }
+        } else {
+            /* Past the newest entry: restore the saved input */
+            g_history_pos = -1;
+            SetWindowText(hwnd, g_history_saved ? g_history_saved : "");
+            sfree(g_history_saved);
+            g_history_saved = NULL;
+            {
+                int len = GetWindowTextLength(hwnd);
+                SendMessage(hwnd, EM_SETSEL, len, len);
+            }
+        }
+        return 0;
+    }
     if (umsg == WM_KEYDOWN && wParam == VK_TAB) {
         tab_complete();
         return 0;
@@ -1019,6 +1087,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                     winsftp_append(g_cmd_line);
                     winsftp_append("\r\n");
                 }
+                if (!g_suppress_echo)
+                    history_add(g_cmd_line);
                 g_cmd_ready = true;
             }
             if (g_input) SetFocus(g_input);
