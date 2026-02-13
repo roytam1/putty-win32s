@@ -876,6 +876,9 @@ static void tab_complete(void)
 static LRESULT CALLBACK OutputSubclassProc(HWND hwnd, UINT umsg,
                                             WPARAM wParam, LPARAM lParam)
 {
+    if (umsg == WM_GETDLGCODE)
+        return CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam)
+               & ~DLGC_WANTTAB; /* let IsDialogMessage handle Tab for cycling */
     if (umsg == WM_LBUTTONUP) {
         /* Let the EDIT finalise the selection, then hand focus back */
         LRESULT r = CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam);
@@ -967,7 +970,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
         /* Input field */
         g_input  = CreateWindow("EDIT", "",
                                 WS_CHILD | WS_VISIBLE | WS_BORDER |
-                                ES_AUTOHSCROLL,
+                                WS_TABSTOP | ES_AUTOHSCROLL,
                                 0, 0, 0, 0,
                                 hwnd, (HMENU)IDC_INPUT, hinst, NULL);
         /* Subclass input EDIT to intercept Tab for completion */
@@ -1022,6 +1025,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                 g_cmd_line  = dupstr("");
                 g_cmd_ready = true;
             }
+            if (g_input) SetFocus(g_input);
         }
         return 0;
 
