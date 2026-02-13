@@ -1020,10 +1020,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                     winsftp_append("\r\n");
                 }
                 g_cmd_ready = true;
-            } else {
-                /* Empty Enter: submit empty line (exits batch/interactive) */
-                g_cmd_line  = dupstr("");
-                g_cmd_ready = true;
             }
             if (g_input) SetFocus(g_input);
         }
