@@ -53,7 +53,8 @@ static HWND g_input;    /* single-line command EDIT */
 static HWND g_status;   /* STATIC for progress/status text */
 static HWND g_send;     /* "Send" push button */
 
-static WNDPROC g_input_orig_proc; /* for subclassing g_input */
+static WNDPROC g_input_orig_proc;  /* for subclassing g_input */
+static WNDPROC g_output_orig_proc; /* for subclassing g_output */
 
 #define IDC_OUTPUT  100
 #define IDC_INPUT   101
@@ -866,6 +867,25 @@ static void tab_complete(void)
 }
 
 /*
+ * Subclass procedure for g_output: allows text selection but returns
+ * focus to g_input as soon as the mouse button is released.
+ * ES_NOHIDESEL keeps the selection highlight visible even without focus,
+ * so the user can still see what they selected and Ctrl+C it via the
+ * intercept in InputSubclassProc below.
+ */
+static LRESULT CALLBACK OutputSubclassProc(HWND hwnd, UINT umsg,
+                                            WPARAM wParam, LPARAM lParam)
+{
+    if (umsg == WM_LBUTTONUP) {
+        /* Let the EDIT finalise the selection, then hand focus back */
+        LRESULT r = CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam);
+        if (g_input) SetFocus(g_input);
+        return r;
+    }
+    return CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam);
+}
+
+/*
  * Subclass procedure for g_input: intercepts Tab for completion.
  * WM_GETDLGCODE returns DLGC_WANTTAB so IsDialogMessage doesn't
  * consume Tab before the window sees it.
@@ -876,6 +896,16 @@ static LRESULT CALLBACK InputSubclassProc(HWND hwnd, UINT umsg,
     if (umsg == WM_GETDLGCODE)
         return CallWindowProc(g_input_orig_proc, hwnd, umsg, wParam, lParam)
                | DLGC_WANTTAB;
+    /* Ctrl+C: if g_output has a selection, copy from there instead */
+    if (umsg == WM_KEYDOWN && wParam == 'C' &&
+            (GetKeyState(VK_CONTROL) & 0x8000) && g_output) {
+        int sel_start = 0, sel_end = 0;
+        SendMessage(g_output, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+        if (sel_start != sel_end) {
+            SendMessage(g_output, WM_COPY, 0, 0);
+            return 0;
+        }
+    }
     if (umsg == WM_KEYDOWN && wParam == VK_TAB) {
         tab_complete();
         return 0;
@@ -928,9 +958,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
         g_output = CreateWindow("EDIT", "",
                                 WS_CHILD | WS_VISIBLE | WS_BORDER |
                                 WS_VSCROLL | ES_MULTILINE |
-                                ES_READONLY | ES_AUTOVSCROLL,
+                                ES_READONLY | ES_AUTOVSCROLL | ES_NOHIDESEL,
                                 0, 0, 0, 0,
                                 hwnd, (HMENU)IDC_OUTPUT, hinst, NULL);
+        /* Subclass output EDIT to suppress mouse clicks */
+        g_output_orig_proc = (WNDPROC)SetWindowLong(
+            g_output, GWL_WNDPROC, (LONG)OutputSubclassProc);
         /* Input field */
         g_input  = CreateWindow("EDIT", "",
                                 WS_CHILD | WS_VISIBLE | WS_BORDER |
