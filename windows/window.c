@@ -1484,6 +1484,28 @@ static void init_dpi_info(WinGuiSeat *wgs)
     }
 }
 
+/* wrapper for TranslateCharsetInfo */
+typedef BOOL (WINAPI *TCSI)(DWORD*, LPCHARSETINFO, DWORD);
+BOOL WINAPI MyTranslateCharsetInfo_init(DWORD *lpSrc, LPCHARSETINFO lpCs, DWORD dwFlags);
+static TCSI MyTranslateCharsetInfo = MyTranslateCharsetInfo_init;
+
+BOOL WINAPI MyTranslateCharsetInfo_fallback(DWORD *lpSrc, LPCHARSETINFO lpCs, DWORD dwFlags) {
+    return FALSE;
+}
+
+BOOL WINAPI MyTranslateCharsetInfo_init(DWORD *lpSrc, LPCHARSETINFO lpCs, DWORD dwFlags) {
+	if( MyTranslateCharsetInfo == MyTranslateCharsetInfo_init ) {
+		MyTranslateCharsetInfo = (TCSI)GetProcAddress(GetModuleHandleA("GDI32.DLL"), "TranslateCharsetInfo");
+
+		// Should be supported since Windows NT 3.51...
+		if( !MyTranslateCharsetInfo ) {
+			MyTranslateCharsetInfo = MyTranslateCharsetInfo_fallback;
+		}
+	}
+
+	return MyTranslateCharsetInfo( lpSrc, lpCs, dwFlags );
+}
+
 /*
  * Initialise all the fonts we will need initially. There may be as many as
  * three or as few as one.  The other (potentially) twenty-one fonts are done
@@ -1596,7 +1618,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         /* !!! Yes the next line is right */
         if (cset == OEM_CHARSET)
             wgs->ucsdata.font_codepage = GetOEMCP();
-        else if (TranslateCharsetInfo ((DWORD *)(ULONG_PTR)cset,
+        else if (MyTranslateCharsetInfo ((DWORD *)(ULONG_PTR)cset,
                                        &info, TCI_SRCCHARSET))
             wgs->ucsdata.font_codepage = info.ciACP;
         else
