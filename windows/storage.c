@@ -103,8 +103,14 @@ static char *make_filename(int index, const char *subname)
         env = getenv("HOME");
         if (!env || !*env)
             env = getenv("HOMEDRIVE");
-        if (!env || !*env)
-            env = "C:";
+        if (!env || !*env) {
+            char buff[MAX_PATH * 2];
+            memset(buff, '\0', sizeof(buff));
+            GetWindowsDirectory(buff, sizeof(buff));
+            buff[2] = 0;
+            //env = "C:";
+            env = dupstr(buff);
+        }
         base = dupcat(env, "\\putty");
     }
 
