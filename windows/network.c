@@ -252,6 +252,30 @@ static HMODULE winsock2_module = NULL;
 static HMODULE wship6_module = NULL;
 #endif
 
+/* SetHandleInformation wrapper */
+typedef BOOL (WINAPI *SSHDLINF)(HANDLE, DWORD, DWORD);
+BOOL WINAPI MySetHandleInformation_fallback(HANDLE hObject, DWORD dwMask, DWORD dwFlags)
+{
+    return TRUE;
+}
+
+BOOL WINAPI MySetHandleInformation_init(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+static SSHDLINF MySetHandleInformation = MySetHandleInformation_init;
+
+int WINAPI MySetHandleInformation_init(HANDLE hObject, DWORD dwMask, DWORD dwFlags)
+{
+	if( MySetHandleInformation == MySetHandleInformation_init ) {
+		MySetHandleInformation = (SSHDLINF)GetProcAddress(GetModuleHandleA("KERNEL32.DLL"), "SetHandleInformation");
+
+		if( !MySetHandleInformation ) {
+			MySetHandleInformation = MySetHandleInformation_fallback;
+		}
+	}
+
+	return MySetHandleInformation( hObject, dwMask, dwFlags );
+}
+/* end of SetHandleInformation wrapper */
+
 static bool sk_startup(int hi, int lo)
 {
     WORD winsock_ver;
@@ -734,7 +758,7 @@ static bool ipv4_is_local_addr(struct in_addr addr)
         SOCKET s = p_socket(AF_INET, SOCK_DGRAM, 0);
         DWORD retbytes;
 
-        SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+        MySetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
 
         if (p_WSAIoctl &&
             p_WSAIoctl(s, SIO_GET_INTERFACE_LIST, NULL, 0,
@@ -975,7 +999,7 @@ static DWORD try_connect(NetSocket *sock)
         goto ret;
     }
 
-    SetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation((HANDLE)s, HANDLE_FLAG_INHERIT, 0);
 
     if (sock->oobinline) {
         BOOL b = true;
@@ -1233,7 +1257,7 @@ static Socket *sk_newlistener_internal(
         return &s->sock;
     }
 
-    SetHandleInformation((HANDLE)sk, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation((HANDLE)sk, HANDLE_FLAG_INHERIT, 0);
 
     s->oobinline = false;
 

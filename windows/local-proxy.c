@@ -12,6 +12,14 @@
 #include "network.h"
 #include "proxy/proxy.h"
 
+/*
+ * Wrappers exported from network.c
+ */
+typedef BOOL (WINAPI *SSHDLINF)(HANDLE, DWORD, DWORD);
+BOOL WINAPI MySetHandleInformation_fallback(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+int WINAPI MySetHandleInformation_init(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+static SSHDLINF MySetHandleInformation = MySetHandleInformation_init;
+
 char *platform_setup_local_proxy(Socket *socket, const char *cmd)
 {
     HANDLE us_to_cmd, cmd_from_us;
@@ -49,10 +57,10 @@ char *platform_setup_local_proxy(Socket *socket, const char *cmd)
                          win_strerror(GetLastError()));
     }
 
-    SetHandleInformation(us_to_cmd, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(us_from_cmd, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation(us_to_cmd, HANDLE_FLAG_INHERIT, 0);
+    MySetHandleInformation(us_from_cmd, HANDLE_FLAG_INHERIT, 0);
     if (us_from_cmd_err != NULL)
-        SetHandleInformation(us_from_cmd_err, HANDLE_FLAG_INHERIT, 0);
+        MySetHandleInformation(us_from_cmd_err, HANDLE_FLAG_INHERIT, 0);
 
     si.cb = sizeof(si);
     si.lpReserved = NULL;
