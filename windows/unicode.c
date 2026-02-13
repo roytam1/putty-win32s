@@ -437,6 +437,30 @@ static const struct cp_list_item cp_list[] = {
 
 static void link_font(WCHAR *line_tbl, WCHAR *font_tbl, WCHAR attr);
 
+/* IsDBCSLeadByteEx wrapper */
+typedef BOOL (WINAPI *IDBCSLBEX)(UINT, BYTE);
+BOOL WINAPI MyIsDBCSLeadByteEx_fallback(UINT CodePage, BYTE TestChar)
+{
+    return IsDBCSLeadByte(TestChar);
+}
+
+BOOL WINAPI MyIsDBCSLeadByteEx_init(UINT CodePage, BYTE TestChar);
+static IDBCSLBEX MyIsDBCSLeadByteEx = MyIsDBCSLeadByteEx_init;
+
+int WINAPI MyIsDBCSLeadByteEx_init(UINT CodePage, BYTE TestChar)
+{
+	if( MyIsDBCSLeadByteEx == MyIsDBCSLeadByteEx_init ) {
+		MyIsDBCSLeadByteEx = (IDBCSLBEX)GetProcAddress(GetModuleHandleA("KERNEL32.DLL"), "IsDBCSLeadByteEx");
+
+		if( !MyIsDBCSLeadByteEx ) {
+			MyIsDBCSLeadByteEx = MyIsDBCSLeadByteEx_fallback;
+		}
+	}
+
+	return MyIsDBCSLeadByteEx( CodePage, TestChar );
+}
+/* end of IsDBCSLeadByteEx wrapper */
+
 /*
  * We keep a collection of reverse mappings from Unicode back to code pages,
  * in the form of array[256] of array[256] of char. These live forever in a
@@ -1445,5 +1469,5 @@ bool BinarySink_put_mb_to_wc(
 
 bool is_dbcs_leadbyte(int codepage, char byte)
 {
-    return IsDBCSLeadByteEx(codepage, byte);
+    return codepage == CP_UTF8 ? byte > 0x80 : MyIsDBCSLeadByteEx(codepage, byte);
 }

@@ -4023,7 +4023,7 @@ static void do_text_internal(
             sgrowarray(wbuf, wbuflen, len);
             for (nlen = mptr = 0; mptr<len; mptr++) {
                 wbuf[nlen] = 0xFFFD;
-                if (IsDBCSLeadByteEx(wgs->ucsdata.font_codepage,
+                if (is_dbcs_leadbyte(wgs->ucsdata.font_codepage,
                                      (BYTE) text[mptr])) {
                     char dbcstext[2];
                     dbcstext[0] = text[mptr] & 0xFF;
