@@ -53,7 +53,33 @@ static HWND g_input;    /* single-line command EDIT */
 static HWND g_status;   /* STATIC for progress/status text */
 static HWND g_send;     /* "Send" push button */
 
-static WNDPROC g_input_orig_proc; /* for subclassing g_input */
+static WNDPROC g_input_orig_proc;  /* for subclassing g_input */
+static WNDPROC g_output_orig_proc; /* for subclassing g_output */
+
+/* ----------------------------------------------------------------
+ * Command history (Up/Down arrow recall)
+ * ---------------------------------------------------------------- */
+#define HISTORY_MAX 100
+static char *g_history[HISTORY_MAX];
+static int   g_history_count = 0;
+static int   g_history_pos   = -1;  /* -1 = not browsing */
+static char *g_history_saved = NULL; /* input line saved when browsing starts */
+
+static void history_add(const char *cmd)
+{
+    if (!cmd || !*cmd) return;
+    if (g_history_count == HISTORY_MAX) {
+        sfree(g_history[0]);
+        memmove(g_history, g_history + 1,
+                (HISTORY_MAX - 1) * sizeof(g_history[0]));
+        g_history_count--;
+    }
+    g_history[g_history_count++] = dupstr(cmd);
+    /* Reset browsing state */
+    g_history_pos = -1;
+    sfree(g_history_saved);
+    g_history_saved = NULL;
+}
 
 #define IDC_OUTPUT  100
 #define IDC_INPUT   101
@@ -866,6 +892,28 @@ static void tab_complete(void)
 }
 
 /*
+ * Subclass procedure for g_output: allows text selection but returns
+ * focus to g_input as soon as the mouse button is released.
+ * ES_NOHIDESEL keeps the selection highlight visible even without focus,
+ * so the user can still see what they selected and Ctrl+C it via the
+ * intercept in InputSubclassProc below.
+ */
+static LRESULT CALLBACK OutputSubclassProc(HWND hwnd, UINT umsg,
+                                            WPARAM wParam, LPARAM lParam)
+{
+    if (umsg == WM_GETDLGCODE)
+        return CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam)
+               & ~DLGC_WANTTAB; /* let IsDialogMessage handle Tab for cycling */
+    if (umsg == WM_LBUTTONUP) {
+        /* Let the EDIT finalise the selection, then hand focus back */
+        LRESULT r = CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam);
+        if (g_input) SetFocus(g_input);
+        return r;
+    }
+    return CallWindowProc(g_output_orig_proc, hwnd, umsg, wParam, lParam);
+}
+
+/*
  * Subclass procedure for g_input: intercepts Tab for completion.
  * WM_GETDLGCODE returns DLGC_WANTTAB so IsDialogMessage doesn't
  * consume Tab before the window sees it.
@@ -876,6 +924,59 @@ static LRESULT CALLBACK InputSubclassProc(HWND hwnd, UINT umsg,
     if (umsg == WM_GETDLGCODE)
         return CallWindowProc(g_input_orig_proc, hwnd, umsg, wParam, lParam)
                | DLGC_WANTTAB;
+    /* Ctrl+C: if g_output has a selection, copy from there instead */
+    if (umsg == WM_KEYDOWN && wParam == 'C' &&
+            (GetKeyState(VK_CONTROL) & 0x8000) && g_output) {
+        int sel_start = 0, sel_end = 0;
+        SendMessage(g_output, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+        if (sel_start != sel_end) {
+            SendMessage(g_output, WM_COPY, 0, 0);
+            return 0;
+        }
+    }
+    if (umsg == WM_KEYDOWN && wParam == VK_UP) {
+        if (g_history_count == 0) return 0;
+        if (g_history_pos == -1) {
+            /* Save whatever the user was typing */
+            int len = GetWindowTextLength(hwnd);
+            sfree(g_history_saved);
+            g_history_saved = snewn(len + 1, char);
+            GetWindowText(hwnd, g_history_saved, len + 1);
+            g_history_pos = g_history_count - 1;
+        } else if (g_history_pos > 0) {
+            g_history_pos--;
+        } else {
+            return 0; /* already at oldest entry */
+        }
+        SetWindowText(hwnd, g_history[g_history_pos]);
+        {
+            int len = (int)strlen(g_history[g_history_pos]);
+            SendMessage(hwnd, EM_SETSEL, len, len);
+        }
+        return 0;
+    }
+    if (umsg == WM_KEYDOWN && wParam == VK_DOWN) {
+        if (g_history_pos == -1) return 0;
+        if (g_history_pos < g_history_count - 1) {
+            g_history_pos++;
+            SetWindowText(hwnd, g_history[g_history_pos]);
+            {
+                int len = (int)strlen(g_history[g_history_pos]);
+                SendMessage(hwnd, EM_SETSEL, len, len);
+            }
+        } else {
+            /* Past the newest entry: restore the saved input */
+            g_history_pos = -1;
+            SetWindowText(hwnd, g_history_saved ? g_history_saved : "");
+            sfree(g_history_saved);
+            g_history_saved = NULL;
+            {
+                int len = GetWindowTextLength(hwnd);
+                SendMessage(hwnd, EM_SETSEL, len, len);
+            }
+        }
+        return 0;
+    }
     if (umsg == WM_KEYDOWN && wParam == VK_TAB) {
         tab_complete();
         return 0;
@@ -928,13 +1029,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
         g_output = CreateWindow("EDIT", "",
                                 WS_CHILD | WS_VISIBLE | WS_BORDER |
                                 WS_VSCROLL | ES_MULTILINE |
-                                ES_READONLY | ES_AUTOVSCROLL,
+                                ES_READONLY | ES_AUTOVSCROLL | ES_NOHIDESEL,
                                 0, 0, 0, 0,
                                 hwnd, (HMENU)IDC_OUTPUT, hinst, NULL);
+        /* Subclass output EDIT to suppress mouse clicks */
+        g_output_orig_proc = (WNDPROC)SetWindowLong(
+            g_output, GWL_WNDPROC, (LONG)OutputSubclassProc);
         /* Input field */
         g_input  = CreateWindow("EDIT", "",
                                 WS_CHILD | WS_VISIBLE | WS_BORDER |
-                                ES_AUTOHSCROLL,
+                                WS_TABSTOP | ES_AUTOHSCROLL,
                                 0, 0, 0, 0,
                                 hwnd, (HMENU)IDC_INPUT, hinst, NULL);
         /* Subclass input EDIT to intercept Tab for completion */
@@ -983,12 +1087,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg,
                     winsftp_append(g_cmd_line);
                     winsftp_append("\r\n");
                 }
-                g_cmd_ready = true;
-            } else {
-                /* Empty Enter: submit empty line (exits batch/interactive) */
-                g_cmd_line  = dupstr("");
+                if (!g_suppress_echo)
+                    history_add(g_cmd_line);
                 g_cmd_ready = true;
             }
+            if (g_input) SetFocus(g_input);
         }
         return 0;
 

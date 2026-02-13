@@ -1949,6 +1949,7 @@ static struct sftp_cmd_lookup {
      * List of sftp commands. This is binary-searched so it MUST be
      * in ASCII order.
      */
+#ifndef WINSFTP_BUILD
     {
         "!", true, "run a local command",
             "<command>\n"
@@ -1956,6 +1957,7 @@ static struct sftp_cmd_lookup {
             "  Runs a local command. For example, \"!del myfile\".\n",
             sftp_cmd_pling
     },
+#endif
     {
         "bye", true, "finish your SFTP session",
             "\n"
