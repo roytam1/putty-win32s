@@ -2059,7 +2059,7 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
             sprintf(date, "%04d-%02d-%02d %02d:%02d",
                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
         else
-            strcpy(date, "????-??-?? ??:??");
+            strcpy(date, "?\??\?-?\?-?\? ?\?:?\?");
         if (is_dir) {
             strcpy(sizestr, "      <DIR>     ");
             ndirs++;
