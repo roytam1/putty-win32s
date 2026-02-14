@@ -2674,11 +2674,16 @@ static int sftp_cmd_scp(struct sftp_command *cmd)
         scp_log_remotepath[sizeof(scp_log_remotepath) - 1] = '\0';
 
         /* Build the remote command.  For get, use glob-aware quoting so that
-         * wildcards like *.txt are expanded by the remote shell. */
-        if (upload)
-            scp_shell_quote(quoted, sizeof(quoted), pathpart);
-        else
-            scp_shell_quote_glob(quoted, sizeof(quoted), pathpart);
+         * wildcards like *.txt are expanded by the remote shell.
+         * Fall back to "." when pathpart is empty (e.g. "host:") so the
+         * remote scp gets a valid target instead of a quoted empty string. */
+        {
+            const char *ep = pathpart[0] ? pathpart : ".";
+            if (upload)
+                scp_shell_quote(quoted, sizeof(quoted), ep);
+            else
+                scp_shell_quote_glob(quoted, sizeof(quoted), ep);
+        }
         sprintf(remote_cmd, "scp%s -%c %s",
                 recursive ? " -r" : "", upload ? 't' : 'f', quoted);
 
