@@ -2993,8 +2993,8 @@ static struct sftp_cmd_lookup {
 #ifdef WINSFTP_BUILD
     {
         "scp", true, "transfer files using SCP (only when not connected)",
-            " [-r] get [-P port] [user@]host:remotepath [localpath]\n"
-            " [-r] put [-P port] local... [user@]host:remotepath\n"
+            " get [-r] [-P port] [user@]host:remotepath [localpath]\n"
+            " put [-r] [-P port] local... [user@]host:remotepath\n"
             "  Opens an SCP connection to the given host, transfers the\n"
             "  specified files, then closes the connection.\n"
             "  'scp get' downloads; 'scp put' uploads (wildcards accepted).\n"
