@@ -1508,6 +1508,9 @@ static void try_send(NetSocket *s)
             len = bufdata.len;
         }
         len = min(len, INT_MAX);       /* WinSock send() takes an int */
+#ifdef WIN32S_COMPAT
+        len = min(len, 4096);          /* Win32s WinSock 1.1 fails with WSAEFAULT for large bufs */
+#endif
         nsent = p_send(s->s, data, len, urgentflag);
         noise_ultralight(NOISE_SOURCE_IOLEN, nsent);
         if (nsent <= 0) {
