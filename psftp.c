@@ -1924,6 +1924,214 @@ static int sftp_cmd_pling(struct sftp_command *cmd)
     return (exitcode == 0);
 }
 
+#ifdef WINSFTP_BUILD
+/*
+ * Local filesystem commands — Windows/winsftp.exe only.
+ * printf() is redirected to winsftp_printf() via -Dprintf=... so all
+ * output goes to the GUI output area.
+ */
+static void win_local_perror(const char *op, const char *path)
+{
+    DWORD err = GetLastError();
+    char buf[256];
+    int len;
+    FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                  NULL, err, 0, buf, (DWORD)sizeof(buf), NULL);
+    len = (int)strlen(buf);
+    while (len > 0 && (buf[len-1] == '\r' || buf[len-1] == '\n'))
+        buf[--len] = '\0';
+    printf("%s: %s: %s\n", op, path, buf);
+}
+
+/*
+ * Enumerate all local filesystem entries matching a pattern (which may
+ * contain the Win32 wildcards * and ?), calling action() for each one.
+ * action() receives the full path and the caller's context; returning
+ * false continues enumeration but causes the overall return to be false.
+ * Returns true only if at least one entry was found and all actions
+ * succeeded.
+ */
+typedef bool (*local_action_fn)(const char *path, const char *op, void *ctx);
+
+static bool local_wildcard_iterate(const char *pattern, const char *op,
+                                    local_action_fn action, void *ctx)
+{
+    HANDLE hFind;
+    WIN32_FIND_DATA fd;
+    char dir[MAX_PATH];
+    char fullpath[MAX_PATH];
+    bool found = false, ok = true;
+    const char *p = pattern + strlen(pattern);
+
+    /* Split off the directory prefix so we can reconstruct full paths */
+    while (p > pattern && p[-1] != '\\' && p[-1] != '/')
+        p--;
+    if (p == pattern) {
+        dir[0] = '\0';
+    } else {
+        int n = (int)(p - pattern);
+        memcpy(dir, pattern, n);
+        dir[n] = '\0';
+    }
+
+    hFind = FindFirstFile(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        win_local_perror(op, pattern);
+        return false;
+    }
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+        found = true;
+        if (dir[0])
+            sprintf(fullpath, "%s%s", dir, fd.cFileName);
+        else
+            strcpy(fullpath, fd.cFileName);
+        if (!action(fullpath, op, ctx))
+            ok = false;
+    } while (FindNextFile(hFind, &fd));
+    FindClose(hFind);
+
+    if (!found) {
+        printf("%s: %s: no matching files\n", op, pattern);
+        return false;
+    }
+    return ok;
+}
+
+/* Returns true if the string contains any Win32 wildcard characters */
+static bool has_wildcards(const char *s)
+{
+    return strchr(s, '*') != NULL || strchr(s, '?') != NULL;
+}
+
+static int sftp_cmd_ldir(struct sftp_command *cmd)
+{
+    char pattern[MAX_PATH];
+    const char *arg;
+    HANDLE hFind;
+    WIN32_FIND_DATA fd;
+    int nfiles = 0, ndirs = 0;
+    size_t arglen;
+
+    arg = (cmd->nwords >= 2) ? cmd->words[1] : ".";
+    arglen = strlen(arg);
+    if (arglen + 3 > MAX_PATH) {
+        printf("ldir: path too long\n");
+        return 0;
+    }
+    /* If the argument already contains wildcards use it as the search
+     * pattern directly; otherwise treat it as a directory and list all. */
+    if (has_wildcards(arg)) {
+        strcpy(pattern, arg);
+    } else if (arg[arglen-1] == '\\' || arg[arglen-1] == '/') {
+        sprintf(pattern, "%s*", arg);
+    } else {
+        sprintf(pattern, "%s\\*", arg);
+    }
+
+    hFind = FindFirstFile(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        win_local_perror("ldir", arg);
+        return 0;
+    }
+    do {
+        SYSTEMTIME st;
+        FILETIME local_ft;
+        char date[32];
+        char sizestr[24];
+        bool is_dir = !!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        FileTimeToLocalFileTime(&fd.ftLastWriteTime, &local_ft);
+        if (FileTimeToSystemTime(&local_ft, &st))
+            sprintf(date, "%04d-%02d-%02d %02d:%02d",
+                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+        else
+            strcpy(date, "????-??-?? ??:??");
+        if (is_dir) {
+            strcpy(sizestr, "      <DIR>     ");
+            ndirs++;
+        } else {
+            ULARGE_INTEGER sz;
+            sz.LowPart  = fd.nFileSizeLow;
+            sz.HighPart = fd.nFileSizeHigh;
+            sprintf(sizestr, "%16llu", (unsigned long long)sz.QuadPart);
+            nfiles++;
+        }
+        printf("%s  %s  %s\n", date, sizestr, fd.cFileName);
+    } while (FindNextFile(hFind, &fd));
+    FindClose(hFind);
+    printf("     %d file(s), %d director%s\n",
+           nfiles, ndirs, ndirs == 1 ? "y" : "ies");
+    return 1;
+}
+
+static bool ldel_action(const char *path, const char *op, void *ctx)
+{
+    if (!DeleteFile(path)) { win_local_perror(op, path); return false; }
+    return true;
+}
+
+static int sftp_cmd_ldel(struct sftp_command *cmd)
+{
+    size_t i;
+    int ret = 1;
+    if (cmd->nwords < 2) {
+        printf("ldel: expects a filename or wildcard\n");
+        return 0;
+    }
+    for (i = 1; i < cmd->nwords; i++)
+        ret &= (int)local_wildcard_iterate(cmd->words[i], "ldel",
+                                           ldel_action, NULL);
+    return ret;
+}
+
+static int sftp_cmd_lmkdir(struct sftp_command *cmd)
+{
+    if (cmd->nwords < 2) {
+        printf("lmkdir: expects a directory name\n");
+        return 0;
+    }
+    if (!CreateDirectory(cmd->words[1], NULL)) {
+        win_local_perror("lmkdir", cmd->words[1]);
+        return 0;
+    }
+    return 1;
+}
+
+static int sftp_cmd_lren(struct sftp_command *cmd)
+{
+    if (cmd->nwords < 3) {
+        printf("lren: expects source and destination names\n");
+        return 0;
+    }
+    if (!MoveFile(cmd->words[1], cmd->words[2])) {
+        win_local_perror("lren", cmd->words[1]);
+        return 0;
+    }
+    return 1;
+}
+
+static bool lrmdir_action(const char *path, const char *op, void *ctx)
+{
+    if (!RemoveDirectory(path)) { win_local_perror(op, path); return false; }
+    return true;
+}
+
+static int sftp_cmd_lrmdir(struct sftp_command *cmd)
+{
+    size_t i;
+    int ret = 1;
+    if (cmd->nwords < 2) {
+        printf("lrmdir: expects a directory name or wildcard\n");
+        return 0;
+    }
+    for (i = 1; i < cmd->nwords; i++)
+        ret &= (int)local_wildcard_iterate(cmd->words[i], "lrmdir",
+                                           lrmdir_action, NULL);
+    return ret;
+}
+#endif /* WINSFTP_BUILD */
+
 static int sftp_cmd_help(struct sftp_command *cmd);
 
 static struct sftp_cmd_lookup {
@@ -2054,6 +2262,27 @@ static struct sftp_cmd_lookup {
             "  default location where the \"get\" command will save files).\n",
             sftp_cmd_lcd
     },
+#ifdef WINSFTP_BUILD
+    {
+        "ldel", true, "delete a local file",
+            " <filename>\n"
+            "  Delete a file from the local filesystem.\n",
+            sftp_cmd_ldel
+    },
+    {
+        "ldir", true, "list local directory",
+            " [ <directory> ]\n"
+            "  List the contents of a local directory.\n"
+            "  If no directory is given, the current local directory is listed.\n",
+            sftp_cmd_ldir
+    },
+    {
+        "lmkdir", true, "create a local directory",
+            " <directory>\n"
+            "  Create a directory on the local filesystem.\n",
+            sftp_cmd_lmkdir
+    },
+#endif
     {
         "lpwd", true, "print local working directory",
             "\n"
@@ -2061,6 +2290,20 @@ static struct sftp_cmd_lookup {
             "  default location where the \"get\" command will save files).\n",
             sftp_cmd_lpwd
     },
+#ifdef WINSFTP_BUILD
+    {
+        "lren", true, "rename a local file",
+            " <oldname> <newname>\n"
+            "  Rename or move a file on the local filesystem.\n",
+            sftp_cmd_lren
+    },
+    {
+        "lrmdir", true, "remove a local directory",
+            " <directory>\n"
+            "  Remove an empty directory from the local filesystem.\n",
+            sftp_cmd_lrmdir
+    },
+#endif
     {
         "ls", true, "dir", NULL,
             sftp_cmd_ls
