@@ -2029,18 +2029,20 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
 
     arg = (cmd->nwords >= 2) ? cmd->words[1] : ".";
     arglen = strlen(arg);
-    if (arglen + 3 > MAX_PATH) {
+    if (arglen + 5 > MAX_PATH) {
         printf("ldir: path too long\n");
         return 0;
     }
     /* If the argument already contains wildcards use it as the search
-     * pattern directly; otherwise treat it as a directory and list all. */
+     * pattern directly; otherwise treat it as a directory and list all.
+     * Use *.*  (not bare *) so that Win32s network redirectors, which
+     * thunk through DOS FindFirst, match files with extensions too. */
     if (has_wildcards(arg)) {
         strcpy(pattern, arg);
     } else if (arg[arglen-1] == '\\' || arg[arglen-1] == '/') {
-        sprintf(pattern, "%s*", arg);
+        sprintf(pattern, "%s*.*", arg);
     } else {
-        sprintf(pattern, "%s\\*", arg);
+        sprintf(pattern, "%s\\*.*", arg);
     }
 
     hFind = FindFirstFile(pattern, &fd);
