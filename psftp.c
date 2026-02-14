@@ -2081,6 +2081,7 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
 static bool ldel_action(const char *path, const char *op, void *ctx)
 {
     if (!DeleteFile(path)) { win_local_perror(op, path); return false; }
+    printf("ldel %s: OK\n", path);
     return true;
 }
 
@@ -2108,6 +2109,7 @@ static int sftp_cmd_lmkdir(struct sftp_command *cmd)
         win_local_perror("lmkdir", cmd->words[1]);
         return 0;
     }
+    printf("lmkdir %s: OK\n", cmd->words[1]);
     return 1;
 }
 
@@ -2121,12 +2123,14 @@ static int sftp_cmd_lren(struct sftp_command *cmd)
         win_local_perror("lren", cmd->words[1]);
         return 0;
     }
+    printf("lren %s -> %s: OK\n", cmd->words[1], cmd->words[2]);
     return 1;
 }
 
 static bool lrmdir_action(const char *path, const char *op, void *ctx)
 {
     if (!RemoveDirectory(path)) { win_local_perror(op, path); return false; }
+    printf("lrmdir %s: OK\n", path);
     return true;
 }
 
