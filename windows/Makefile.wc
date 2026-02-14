@@ -27,7 +27,7 @@ COMPAT = -DNO_GSSAPI -DNO_IPV6 -DNO_MULTIMON &
          -DNO_HTMLHELP &
          -DWIN32S_COMPAT -DLEGACY_WINDOWS
 
-CFLAGS = -za99 -bt=nt -l=win95 -od -D_WINDOWS -D_WIN32 -DWIN32 &
+CFLAGS = -za99 -bt=nt -l=win95 -ox -D_WINDOWS -D_WIN32 -DWIN32 &
          -D_NO_OLDNAMES &
          -DHAVE_STRTOUMAX=1 &
          -DHAVE_GCP_RESULTSW=1 &
