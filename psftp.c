@@ -2029,18 +2029,20 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
 
     arg = (cmd->nwords >= 2) ? cmd->words[1] : ".";
     arglen = strlen(arg);
-    if (arglen + 3 > MAX_PATH) {
+    if (arglen + 5 > MAX_PATH) {
         printf("ldir: path too long\n");
         return 0;
     }
     /* If the argument already contains wildcards use it as the search
-     * pattern directly; otherwise treat it as a directory and list all. */
+     * pattern directly; otherwise treat it as a directory and list all.
+     * Use *.*  (not bare *) so that Win32s network redirectors, which
+     * thunk through DOS FindFirst, match files with extensions too. */
     if (has_wildcards(arg)) {
         strcpy(pattern, arg);
     } else if (arg[arglen-1] == '\\' || arg[arglen-1] == '/') {
-        sprintf(pattern, "%s*", arg);
+        sprintf(pattern, "%s*.*", arg);
     } else {
-        sprintf(pattern, "%s\\*", arg);
+        sprintf(pattern, "%s\\*.*", arg);
     }
 
     hFind = FindFirstFile(pattern, &fd);
@@ -2059,7 +2061,7 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
             sprintf(date, "%04d-%02d-%02d %02d:%02d",
                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
         else
-            strcpy(date, "????-??-?? ??:??");
+            strcpy(date, "?\??\?-?\?-?\? ?\?:?\?");
         if (is_dir) {
             strcpy(sizestr, "      <DIR>     ");
             ndirs++;
@@ -2081,6 +2083,7 @@ static int sftp_cmd_ldir(struct sftp_command *cmd)
 static bool ldel_action(const char *path, const char *op, void *ctx)
 {
     if (!DeleteFile(path)) { win_local_perror(op, path); return false; }
+    printf("ldel %s: OK\n", path);
     return true;
 }
 
@@ -2108,6 +2111,7 @@ static int sftp_cmd_lmkdir(struct sftp_command *cmd)
         win_local_perror("lmkdir", cmd->words[1]);
         return 0;
     }
+    printf("lmkdir %s: OK\n", cmd->words[1]);
     return 1;
 }
 
@@ -2121,12 +2125,14 @@ static int sftp_cmd_lren(struct sftp_command *cmd)
         win_local_perror("lren", cmd->words[1]);
         return 0;
     }
+    printf("lren %s -> %s: OK\n", cmd->words[1], cmd->words[2]);
     return 1;
 }
 
 static bool lrmdir_action(const char *path, const char *op, void *ctx)
 {
     if (!RemoveDirectory(path)) { win_local_perror(op, path); return false; }
+    printf("lrmdir %s: OK\n", path);
     return true;
 }
 
@@ -2674,11 +2680,16 @@ static int sftp_cmd_scp(struct sftp_command *cmd)
         scp_log_remotepath[sizeof(scp_log_remotepath) - 1] = '\0';
 
         /* Build the remote command.  For get, use glob-aware quoting so that
-         * wildcards like *.txt are expanded by the remote shell. */
-        if (upload)
-            scp_shell_quote(quoted, sizeof(quoted), pathpart);
-        else
-            scp_shell_quote_glob(quoted, sizeof(quoted), pathpart);
+         * wildcards like *.txt are expanded by the remote shell.
+         * Fall back to "." when pathpart is empty (e.g. "host:") so the
+         * remote scp gets a valid target instead of a quoted empty string. */
+        {
+            const char *ep = pathpart[0] ? pathpart : ".";
+            if (upload)
+                scp_shell_quote(quoted, sizeof(quoted), ep);
+            else
+                scp_shell_quote_glob(quoted, sizeof(quoted), ep);
+        }
         sprintf(remote_cmd, "scp%s -%c %s",
                 recursive ? " -r" : "", upload ? 't' : 'f', quoted);
 

@@ -752,9 +752,8 @@ static void split_path(const char *token,
 static void tab_complete(void)
 {
     char input_buf[1024];
-    int input_len, token_offset, i;
-    const char *token_start;
-    char *token, *dir_part, *prefix_part;
+    int input_len, cursor_pos, token_offset, token_len, i;
+    char *token, *tail, *dir_part, *prefix_part;
     char search_pat[MAX_PATH + 4];
     HANDLE hFind;
     WIN32_FIND_DATA fd;
@@ -768,13 +767,26 @@ static void tab_complete(void)
     input_len = GetWindowText(g_input, input_buf, (int)sizeof(input_buf) - 1);
     input_buf[input_len] = '\0';
 
-    /* The token to complete is everything after the last space */
+    /* Get cursor position (use selection start) */
     {
-        char *sp = strrchr(input_buf, ' ');
-        token_start = sp ? sp + 1 : input_buf;
+        DWORD sel_start, sel_end;
+        SendMessage(g_input, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
+        cursor_pos = (int)sel_start;
+        if (cursor_pos > input_len) cursor_pos = input_len;
     }
-    token_offset = (int)(token_start - input_buf);
-    token = dupstr(token_start);
+
+    /* Token starts after the last space before the cursor */
+    token_offset = 0;
+    for (i = 0; i < cursor_pos; i++)
+        if (input_buf[i] == ' ')
+            token_offset = i + 1;
+
+    /* token = text from token_offset to cursor; tail = text after cursor */
+    token_len = cursor_pos - token_offset;
+    token = snewn(token_len + 1, char);
+    memcpy(token, input_buf + token_offset, token_len);
+    token[token_len] = '\0';
+    tail = dupstr(input_buf + cursor_pos);
 
     split_path(token, &dir_part, &prefix_part);
 
@@ -817,20 +829,18 @@ static void tab_complete(void)
         const char *m = matches[0];
         int mlen = (int)strlen(m);
         bool add_space = (mlen == 0 || m[mlen - 1] != '\\');
-        char *new_text = snewn(token_offset + mlen + 2, char);
+        int tail_len = (int)strlen(tail);
+        int new_cursor;
+        char *new_text = snewn(token_offset + mlen + 1 + tail_len + 1, char);
         memcpy(new_text, input_buf, token_offset);
         memcpy(new_text + token_offset, m, mlen);
-        if (add_space) {
-            new_text[token_offset + mlen]     = ' ';
-            new_text[token_offset + mlen + 1] = '\0';
-        } else {
-            new_text[token_offset + mlen] = '\0';
-        }
+        new_cursor = token_offset + mlen;
+        if (add_space)
+            new_text[new_cursor++] = ' ';
+        memcpy(new_text + new_cursor, tail, tail_len);
+        new_text[new_cursor + tail_len] = '\0';
         SetWindowText(g_input, new_text);
-        {
-            int newlen = (int)strlen(new_text);
-            SendMessage(g_input, EM_SETSEL, newlen, newlen);
-        }
+        SendMessage(g_input, EM_SETSEL, new_cursor, new_cursor);
         sfree(new_text);
         goto cleanup;
     }
@@ -869,15 +879,15 @@ static void tab_complete(void)
     if (common_len > (int)strlen(prefix_part)) {
         char *completed = dupcat(dir_part, common);
         int clen = (int)strlen(completed);
-        char *new_text = snewn(token_offset + clen + 1, char);
+        int tail_len = (int)strlen(tail);
+        int new_cursor = token_offset + clen;
+        char *new_text = snewn(new_cursor + tail_len + 1, char);
         memcpy(new_text, input_buf, token_offset);
         memcpy(new_text + token_offset, completed, clen);
-        new_text[token_offset + clen] = '\0';
+        memcpy(new_text + new_cursor, tail, tail_len);
+        new_text[new_cursor + tail_len] = '\0';
         SetWindowText(g_input, new_text);
-        {
-            int newlen = (int)strlen(new_text);
-            SendMessage(g_input, EM_SETSEL, newlen, newlen);
-        }
+        SendMessage(g_input, EM_SETSEL, new_cursor, new_cursor);
         sfree(completed);
         sfree(new_text);
     }
@@ -887,6 +897,7 @@ static void tab_complete(void)
         sfree(matches[i]);
     sfree(matches);
     sfree(token);
+    sfree(tail);
     sfree(dir_part);
     sfree(prefix_part);
 }
